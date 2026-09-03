@@ -2643,14 +2643,41 @@ async function saveProject(
         : '클라우드 저장됨',
       'saved'
     );
-
-
-    showToast(
-      finalize
-        ? '원본파일과 동아리 완성본 이미지가 저장되었습니다.'
-        : '편집 가능한 원본이 클라우드에 저장되었습니다.',
-      'success'
-    );
+    
+    
+    if (finalize) {
+    
+      try {
+    
+        await downloadCompleteFiles();
+    
+    
+        showToast(
+          '원본과 완성본을 저장하고 PNG·PDF 파일을 만들었습니다.',
+          'success'
+        );
+    
+      } catch (downloadError) {
+    
+        console.warn(
+          '완성본 파일 다운로드 실패:',
+          downloadError
+        );
+    
+    
+        showToast(
+          'Drive 저장은 완료됐지만 PNG·PDF 파일 생성에 실패했습니다.',
+          'error'
+        );
+      }
+    
+    } else {
+    
+      showToast(
+        '편집 가능한 원본이 클라우드에 저장되었습니다.',
+        'success'
+      );
+    }
 
   } catch (error) {
 
@@ -3370,6 +3397,82 @@ function showAppsScriptUrlError() {
   showToast(
     'script.js 상단의 APPS_SCRIPT_URL에 배포된 Apps Script 웹 앱 주소를 입력해 주세요.',
     'error'
+  );
+}
+
+
+
+async function downloadCompleteFiles() {
+
+  await loadExportLibraries();
+
+
+  const baseName =
+    safeFileName(
+      state.clubName ||
+      '동아리_전시자료'
+    );
+
+
+  /*
+   * 한 번만 고해상도로 렌더링하고
+   * PNG와 PDF 모두 같은 이미지를 사용한다.
+   */
+  const dataUrl =
+    await capturePosterDataUrl(
+      APP_CONFIG.EXPORT_PIXEL_RATIO
+    );
+
+
+  /* =====================
+     PNG 다운로드
+  ===================== */
+
+  downloadDataUrl(
+    dataUrl,
+    `${baseName}.png`
+  );
+
+
+  /* =====================
+     PDF 다운로드
+  ===================== */
+
+  const jsPDF =
+    window.jspdf?.jsPDF;
+
+
+  if (!jsPDF) {
+
+    throw new Error(
+      'PDF 라이브러리를 불러오지 못했습니다.'
+    );
+  }
+
+
+  const pdf =
+    new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+      compress: true
+    });
+
+
+  pdf.addImage(
+    dataUrl,
+    'PNG',
+    0,
+    0,
+    210,
+    297,
+    undefined,
+    'FAST'
+  );
+
+
+  pdf.save(
+    `${baseName}.pdf`
   );
 }
 
@@ -4332,7 +4435,7 @@ function fitPreviewToWindow(
           20
         ) /
         20,
-        0.5,
+        0.4,
         1
       )
     );
@@ -4349,7 +4452,7 @@ function changeZoom(
     clamp(
       previewZoom +
         delta,
-      0.5,
+      0.4,
       1.3
     )
   );
