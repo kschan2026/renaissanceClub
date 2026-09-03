@@ -5,7 +5,7 @@
  * Code.gs v3 / 새 index.html / 새 style.css 기준
  */
 
-const APPS_SCRIPT_URL = '여기에_배포된_APPS_SCRIPT_웹앱_URL_입력';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz5FpPe6BD8ikxSgIK2r5AQ9vkmh-np5WJshqNA4JlHVgCJENSFkA4oemhLkFnOMtk4/exec';
 
 const APP_CONFIG = Object.freeze({
   TARGET_ACTIVITY_LENGTH: 200,
