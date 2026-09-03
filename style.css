@@ -32,7 +32,7 @@
   --radius-lg: 16px;
 
   --topbar-height: 66px;
-  --editor-width: 390px;
+  --preview-width: 430px;
 
   font-family:
     "Pretendard",
@@ -297,18 +297,37 @@ textarea:focus-visible,
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(760px, 1fr) var(--editor-width);
+
+  /* 왼쪽 편집 / 오른쪽 미리보기 */
+  grid-template-columns:
+    minmax(620px, 1fr)
+    minmax(380px, var(--preview-width));
+
+  grid-template-areas:
+    "editor preview";
+
   height: calc(100vh - var(--topbar-height));
+
   overflow: hidden;
 }
 
+
 .preview-area {
+  grid-area: preview;
+
   min-width: 0;
+
   display: flex;
   flex-direction: column;
+
   background:
-    linear-gradient(rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.12)),
+    linear-gradient(
+      rgba(255, 255, 255, 0.12),
+      rgba(255, 255, 255, 0.12)
+    ),
     var(--bg);
+
+  border-left: 1px solid var(--line);
 }
 
 .preview-toolbar {
@@ -367,7 +386,7 @@ textarea:focus-visible,
   padding: 56px 58px 46px;
   overflow: hidden;
   color: #222;
-  background: #fff;
+  background: var(--poster-bg, #fff);
   box-shadow: var(--shadow-md);
   transform: scale(var(--page-scale));
   transform-origin: top center;
@@ -720,11 +739,18 @@ textarea:focus-visible,
 ========================= */
 
 .editor-panel {
-  width: var(--editor-width);
+  grid-area: editor;
+
+  width: auto;
+  min-width: 0;
+
   height: 100%;
+
   overflow-y: auto;
+
   background: var(--panel);
-  border-left: 1px solid var(--line);
+
+  border-left: 0;
 }
 
 .editor-panel__header {
