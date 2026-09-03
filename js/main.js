@@ -1,4 +1,9 @@
 import {
+  initSplitter
+} from './splitter.js';
+
+
+import {
   cacheDom,
   showToast
 } from './dom.js';
@@ -94,7 +99,8 @@ async function init() {
     }
   );
 
-
+  initSplitter();
+  
   initEditor();
 
   initPhotos();
