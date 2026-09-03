@@ -2,28 +2,75 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
+
   <meta
     name="description"
-    content="자율동아리·창체동아리 전시자료를 쉽고 통일된 형식으로 제작하는 웹앱"
+    content="동아리 전시자료 제작 웹앱"
   />
+
   <title>동아리 전시자료 제작</title>
 
-  <link rel="stylesheet" href="./style.css" />
+  <link
+    rel="stylesheet"
+    href="./style.css"
+  />
+
+  <script
+    src="./script.js"
+    defer
+  ></script>
 </head>
 
+
 <body>
-  <div id="app" class="app">
-    <!-- 상단 도구 모음 -->
-    <header class="topbar">
-      <div class="topbar__brand">
-        <strong class="topbar__title">동아리 전시자료 제작</strong>
-        <span id="save-status" class="save-status" aria-live="polite">
-          저장되지 않음
-        </span>
+
+  <!-- ======================================================
+       상단 메뉴
+  ======================================================= -->
+
+  <header class="app-header">
+
+    <div class="app-header__brand">
+
+      <div class="brand-mark" aria-hidden="true">
+        展
       </div>
 
-      <nav class="topbar__actions" aria-label="프로젝트 도구">
+      <div class="brand-text">
+
+        <h1>
+          동아리 전시자료 제작
+        </h1>
+
+        <p>
+          활동 내용과 사진을 활용해 전시자료를 제작합니다.
+        </p>
+
+      </div>
+
+    </div>
+
+
+    <div class="app-header__right">
+
+      <div
+        id="save-status"
+        class="save-status"
+        aria-live="polite"
+      >
+        새 작업
+      </div>
+
+
+      <nav
+        class="top-actions"
+        aria-label="프로젝트 기능"
+      >
 
         <button
           type="button"
@@ -32,7 +79,8 @@
         >
           새로 만들기
         </button>
-      
+
+
         <button
           type="button"
           id="btn-load-cloud"
@@ -40,12 +88,14 @@
         >
           클라우드 불러오기
         </button>
-      
-        <span
-          class="topbar__divider"
+
+
+        <div
+          class="top-actions__divider"
           aria-hidden="true"
-        ></span>
-      
+        ></div>
+
+
         <button
           type="button"
           id="btn-save-draft"
@@ -53,533 +103,1782 @@
         >
           작성 중 저장
         </button>
-      
+
+
         <button
           type="button"
           id="btn-save-complete"
           class="btn btn--primary"
-          title="Drive 저장과 함께 PNG·PDF 파일을 생성합니다."
         >
           완성본 저장
         </button>
-      
+
       </nav>
-    </header>
 
-    <!-- 본문 -->
-    <main class="workspace">
-      <!-- 실제 출력물 미리보기 -->
-      <section class="preview-area" aria-label="전시자료 미리보기">
-        <div class="preview-toolbar">
-          <div>
-            <span class="preview-toolbar__label">출력 미리보기</span>
-            <span id="paper-size-label" class="preview-toolbar__meta">A4 세로</span>
-          </div>
+    </div>
 
-          <div class="preview-toolbar__actions">
-            <button
-              type="button"
-              id="btn-zoom-out"
-              class="icon-btn"
-              aria-label="미리보기 축소"
-            >
-              −
-            </button>
+  </header>
 
-            <span id="zoom-label" class="zoom-label">100%</span>
 
-            <button
-              type="button"
-              id="btn-zoom-in"
-              class="icon-btn"
-              aria-label="미리보기 확대"
-            >
-              +
-            </button>
-          </div>
+
+  <!-- ======================================================
+       전체 작업 영역
+  ======================================================= -->
+
+  <main class="workspace">
+
+
+    <!-- ====================================================
+         왼쪽 편집기
+    ===================================================== -->
+
+    <section
+      class="editor-pane"
+      aria-label="전시자료 편집"
+    >
+
+      <div class="editor-pane__header">
+
+        <div>
+
+          <h2>
+            내용 편집
+          </h2>
+
+          <p>
+            오른쪽 미리보기에 바로 반영됩니다.
+          </p>
+
         </div>
 
-        <div class="paper-stage">
-          <!-- PNG/PDF 변환 대상 -->
-          <article
-            id="poster-canvas"
-            class="poster"
-            data-paper-size="a4"
-            data-club-type="autonomous"
-            aria-label="동아리 전시자료"
-          >
-            <!-- 문서 상단 -->
-            <header class="poster__header">
-              <div class="poster__header-main">
-                <p class="poster__eyebrow">2026 동아리 활동 전시</p>
 
-                <h1
-                  id="preview-club-name"
-                  class="poster__club-name editable"
-                  contenteditable="true"
-                  data-bind="clubName"
-                  data-placeholder="동아리명을 입력하세요"
-                >
-                  동아리명
-                </h1>
-              </div>
+        <button
+          type="button"
+          id="btn-reset-content"
+          class="btn btn--text"
+        >
+          내용 초기화
+        </button>
 
-              <div class="poster__header-info">
-                <span
-                  id="preview-club-type"
-                  class="poster__type-badge"
-                >
-                  자율동아리
-                </span>
+      </div>
 
-                <p class="poster__teacher">
-                  담당교사
-                  <span
-                    id="preview-teacher"
-                    class="editable"
-                    contenteditable="true"
-                    data-bind="teacher"
-                    data-placeholder="성명"
-                  >성명</span>
-                </p>
-              </div>
-            </header>
 
-            <!-- 1. 활동 제목 -->
-            <section class="poster-section poster-section--title">
-              <div class="poster-section__heading">
-                <span class="section-number">1</span>
-                <h2>활동 제목</h2>
-              </div>
 
-              <div
-                id="preview-title"
-                class="poster__activity-title editable"
-                contenteditable="true"
-                data-bind="title"
-                data-placeholder="활동 제목을 입력하세요"
-              >
-                활동 제목을 입력하세요
-              </div>
-            </section>
+      <div class="editor-scroll">
 
-            <!-- 2. 활동 내용 -->
-            <section class="poster-section poster-section--content">
-              <div class="poster-section__heading">
-                <span class="section-number">2</span>
-                <h2>주요 활동 내용</h2>
-              </div>
 
-              <div
-                id="preview-activity"
-                class="poster__activity-content editable"
-                contenteditable="true"
-                data-bind="activityText"
-                data-placeholder="동아리 활동 내용을 입력하세요"
-              >
-                동아리 활동 내용을 입력하세요.
-              </div>
-            </section>
+        <!-- ================================================
+             1. 기본 정보
+        ================================================= -->
 
-            <!-- 3. 활동 사진 -->
-            <section class="poster-section poster-section--photos">
-              <div class="poster-section__heading">
-                <span class="section-number">3</span>
-                <h2>활동 사진</h2>
-              </div>
-
-              <div
-                id="photo-grid"
-                class="photo-grid"
-                data-layout="2"
-                aria-label="활동 사진 영역"
-              >
-                <!-- 사진 슬롯 1 -->
-                <figure class="photo-card" data-photo-index="0">
-                  <div class="photo-frame">
-                    <img class="photo-image" alt="" hidden />
-                    <div class="photo-placeholder">
-                      <span class="photo-placeholder__icon" aria-hidden="true">＋</span>
-                      <strong>사진 추가</strong>
-                      <small>클릭하거나 파일을 끌어놓으세요</small>
-                    </div>
-                  </div>
-
-                  <figcaption
-                    class="photo-caption editable"
-                    contenteditable="true"
-                    data-caption-index="0"
-                    data-placeholder="사진 설명"
-                  ></figcaption>
-                </figure>
-
-                <!-- 사진 슬롯 2 -->
-                <figure class="photo-card" data-photo-index="1">
-                  <div class="photo-frame">
-                    <img class="photo-image" alt="" hidden />
-                    <div class="photo-placeholder">
-                      <span class="photo-placeholder__icon" aria-hidden="true">＋</span>
-                      <strong>사진 추가</strong>
-                      <small>클릭하거나 파일을 끌어놓으세요</small>
-                    </div>
-                  </div>
-
-                  <figcaption
-                    class="photo-caption editable"
-                    contenteditable="true"
-                    data-caption-index="1"
-                    data-placeholder="사진 설명"
-                  ></figcaption>
-                </figure>
-
-                <!-- 사진 슬롯 3 -->
-                <figure class="photo-card" data-photo-index="2">
-                  <div class="photo-frame">
-                    <img class="photo-image" alt="" hidden />
-                    <div class="photo-placeholder">
-                      <span class="photo-placeholder__icon" aria-hidden="true">＋</span>
-                      <strong>사진 추가</strong>
-                      <small>클릭하거나 파일을 끌어놓으세요</small>
-                    </div>
-                  </div>
-
-                  <figcaption
-                    class="photo-caption editable"
-                    contenteditable="true"
-                    data-caption-index="2"
-                    data-placeholder="사진 설명"
-                  ></figcaption>
-                </figure>
-
-                <!-- 사진 슬롯 4 -->
-                <figure class="photo-card" data-photo-index="3">
-                  <div class="photo-frame">
-                    <img class="photo-image" alt="" hidden />
-                    <div class="photo-placeholder">
-                      <span class="photo-placeholder__icon" aria-hidden="true">＋</span>
-                      <strong>사진 추가</strong>
-                      <small>클릭하거나 파일을 끌어놓으세요</small>
-                    </div>
-                  </div>
-
-                  <figcaption
-                    class="photo-caption editable"
-                    contenteditable="true"
-                    data-caption-index="3"
-                    data-placeholder="사진 설명"
-                  ></figcaption>
-                </figure>
-              </div>
-            </section>
-          </article>
-        </div>
-      </section>
-
-      <!-- 우측 편집 패널 -->
-      <aside class="editor-panel" aria-label="전시자료 편집">
-        <div class="editor-panel__header">
-          <div>
-            <h2>편집</h2>
-            <p>입력한 내용은 왼쪽 출력물에 바로 반영됩니다.</p>
-          </div>
-        </div>
-
-        <!-- 기본 설정 -->
         <section class="editor-section">
-          <h3 class="editor-section__title">기본 설정</h3>
 
-          <div class="field">
-            <span class="field__label">동아리 종류</span>
+          <div class="section-heading">
 
-            <div class="segmented-control" role="radiogroup" aria-label="동아리 종류">
-              <label class="segmented-control__item">
-                <input
-                  type="radio"
-                  name="clubType"
-                  value="autonomous"
-                  checked
-                />
-                <span>자율동아리</span>
-              </label>
-
-              <label class="segmented-control__item">
-                <input
-                  type="radio"
-                  name="clubType"
-                  value="creative"
-                />
-                <span>창체동아리</span>
-              </label>
+            <div class="section-heading__number">
+              1
             </div>
+
+            <div>
+
+              <h3>
+                기본 정보
+              </h3>
+
+              <p>
+                전시자료 상단에 표시되는 정보입니다.
+              </p>
+
+            </div>
+
           </div>
 
-          <label class="field">
-            <span class="field__label">동아리명</span>
-            <input
-              type="text"
-              id="input-club-name"
-              name="clubName"
-              maxlength="100"
-              autocomplete="off"
-              placeholder="예: 코딩동아리"
-            />
-          </label>
 
-          <label class="field">
-            <span class="field__label">담당교사</span>
-            <input
-              type="text"
-              id="input-teacher"
-              name="teacher"
-              maxlength="50"
-              autocomplete="off"
-              placeholder="예: 홍길동"
-            />
-          </label>
+          <div class="form-grid">
+
+
+            <!-- 동아리 종류 -->
+
+            <div class="field field--full">
+
+              <span class="field__label">
+                동아리 종류
+              </span>
+
+
+              <div
+                class="segmented-control"
+                role="radiogroup"
+                aria-label="동아리 종류"
+              >
+
+                <label class="segmented-option">
+
+                  <input
+                    type="radio"
+                    name="clubType"
+                    value="autonomous"
+                    checked
+                  />
+
+                  <span>
+                    자율동아리
+                  </span>
+
+                </label>
+
+
+                <label class="segmented-option">
+
+                  <input
+                    type="radio"
+                    name="clubType"
+                    value="creative"
+                  />
+
+                  <span>
+                    창체동아리
+                  </span>
+
+                </label>
+
+              </div>
+
+
+              <p class="field__help">
+                동아리 종류에 따라 전시자료의 기본 바탕색이 자동으로 변경됩니다.
+              </p>
+
+            </div>
+
+
+
+            <!-- 동아리명 -->
+
+            <label class="field">
+
+              <span class="field__label">
+                동아리명
+              </span>
+
+              <input
+                type="text"
+                id="input-club-name"
+                maxlength="100"
+                autocomplete="off"
+                placeholder="예: 코딩동아리"
+              />
+
+            </label>
+
+
+
+            <!-- 담당교사 -->
+
+            <label class="field">
+
+              <span class="field__label">
+                담당교사
+              </span>
+
+              <input
+                type="text"
+                id="input-teacher"
+                maxlength="100"
+                autocomplete="off"
+                placeholder="예: 홍길동"
+              />
+
+            </label>
+
+          </div>
+
         </section>
 
-        <!-- 글 편집 -->
+
+
+        <!-- ================================================
+             2. 활동 내용
+        ================================================= -->
+
         <section class="editor-section">
-          <h3 class="editor-section__title">글 편집</h3>
 
-          <label class="field">
-            <span class="field__label">활동 제목</span>
-            <input
-              type="text"
-              id="input-title"
-              name="title"
-              maxlength="120"
-              autocomplete="off"
-              placeholder="활동 제목을 입력하세요"
-            />
-          </label>
+          <div class="section-heading">
 
-          <label class="field">
-            <span class="field__label-row">
-              <span class="field__label">주요 활동 내용</span>
-              <span id="activity-count" class="char-count">0자</span>
-            </span>
+            <div class="section-heading__number">
+              2
+            </div>
 
-            <textarea
-              id="input-activity"
-              name="activityText"
-              rows="12"
-              maxlength="3000"
-              placeholder="활동 내용을 입력하세요. 짧은 메모 형식으로 적어도 AI가 약 400자 분량으로 자연스럽게 다듬어 줍니다."
-            ></textarea>
-          </label>
+            <div>
+
+              <h3>
+                활동 내용
+              </h3>
+
+              <p>
+                기본 양식은 활동 2개로 구성됩니다.
+              </p>
+
+            </div>
+
+          </div>
+
+
+
+          <div
+            id="activity-editor-list"
+            class="activity-editor-list"
+          >
+
+
+            <!-- ============================================
+                 활동 1
+            ============================================= -->
+
+            <article
+              class="activity-editor"
+              data-activity-id="activity_1"
+            >
+
+              <header class="activity-editor__header">
+
+                <div>
+
+                  <span class="activity-editor__number">
+                    ACTIVITY 01
+                  </span>
+
+                  <h4>
+                    활동 1
+                  </h4>
+
+                </div>
+
+              </header>
+
+
+
+              <!-- 활동 1 제목 -->
+
+              <label class="field field--full">
+
+                <span class="field__label">
+                  활동 제목
+                </span>
+
+                <input
+                  type="text"
+                  id="activity-1-title"
+                  class="activity-title-input"
+                  data-activity-field="title"
+                  maxlength="120"
+                  placeholder="예: 마이크로비트 기초 기능 익히기"
+                />
+
+              </label>
+
+
+
+              <!-- 활동 1 내용 -->
+
+              <label class="field field--full">
+
+                <div class="field__label-row">
+
+                  <span class="field__label">
+                    활동 내용
+                  </span>
+
+                  <span
+                    id="activity-1-count"
+                    class="character-count"
+                  >
+                    0자
+                  </span>
+
+                </div>
+
+                <textarea
+                  id="activity-1-content"
+                  class="activity-content-input"
+                  data-activity-field="content"
+                  maxlength="3000"
+                  rows="6"
+                  placeholder="진행한 활동을 간단하게 입력해 주세요. 짧게 메모해도 AI가 자연스럽게 다듬을 수 있습니다."
+                ></textarea>
+
+              </label>
+
+
+
+              <!-- 활동 1 사진 -->
+
+              <div class="activity-photo-section">
+
+                <div class="subheading">
+
+                  <div>
+
+                    <strong>
+                      활동 사진
+                    </strong>
+
+                    <span>
+                      기본 2장
+                    </span>
+
+                  </div>
+
+                </div>
+
+
+                <div class="activity-photo-grid">
+
+
+                  <!-- 사진 1 -->
+
+                  <div
+                    class="photo-editor-card"
+                    data-photo-slot="activity_1_photo_1"
+                  >
+
+                    <button
+                      type="button"
+                      class="photo-editor-card__preview"
+                      data-photo-select="activity_1_photo_1"
+                      aria-label="활동 1 사진 1 선택"
+                    >
+
+                      <img
+                        class="photo-editor-card__image"
+                        alt=""
+                        hidden
+                      />
+
+                      <span class="photo-editor-card__empty">
+
+                        <span
+                          class="photo-editor-card__plus"
+                          aria-hidden="true"
+                        >
+                          +
+                        </span>
+
+                        <span>
+                          사진 추가
+                        </span>
+
+                      </span>
+
+                    </button>
+
+
+                    <div class="photo-editor-card__controls">
+
+                      <input
+                        type="text"
+                        class="photo-caption-input"
+                        data-photo-caption="activity_1_photo_1"
+                        maxlength="300"
+                        placeholder="사진 설명"
+                      />
+
+
+                      <div class="photo-editor-card__buttons">
+
+                        <button
+                          type="button"
+                          class="mini-btn"
+                          data-photo-crop="activity_1_photo_1"
+                          hidden
+                        >
+                          위치 조정
+                        </button>
+
+                        <button
+                          type="button"
+                          class="mini-btn mini-btn--danger"
+                          data-photo-remove="activity_1_photo_1"
+                          hidden
+                        >
+                          삭제
+                        </button>
+
+                      </div>
+
+                    </div>
+
+                  </div>
+
+
+
+                  <!-- 사진 2 -->
+
+                  <div
+                    class="photo-editor-card"
+                    data-photo-slot="activity_1_photo_2"
+                  >
+
+                    <button
+                      type="button"
+                      class="photo-editor-card__preview"
+                      data-photo-select="activity_1_photo_2"
+                      aria-label="활동 1 사진 2 선택"
+                    >
+
+                      <img
+                        class="photo-editor-card__image"
+                        alt=""
+                        hidden
+                      />
+
+                      <span class="photo-editor-card__empty">
+
+                        <span
+                          class="photo-editor-card__plus"
+                          aria-hidden="true"
+                        >
+                          +
+                        </span>
+
+                        <span>
+                          사진 추가
+                        </span>
+
+                      </span>
+
+                    </button>
+
+
+                    <div class="photo-editor-card__controls">
+
+                      <input
+                        type="text"
+                        class="photo-caption-input"
+                        data-photo-caption="activity_1_photo_2"
+                        maxlength="300"
+                        placeholder="사진 설명"
+                      />
+
+
+                      <div class="photo-editor-card__buttons">
+
+                        <button
+                          type="button"
+                          class="mini-btn"
+                          data-photo-crop="activity_1_photo_2"
+                          hidden
+                        >
+                          위치 조정
+                        </button>
+
+                        <button
+                          type="button"
+                          class="mini-btn mini-btn--danger"
+                          data-photo-remove="activity_1_photo_2"
+                          hidden
+                        >
+                          삭제
+                        </button>
+
+                      </div>
+
+                    </div>
+
+                  </div>
+
+                </div>
+
+              </div>
+
+            </article>
+
+
+
+
+            <!-- ============================================
+                 활동 2
+            ============================================= -->
+
+            <article
+              class="activity-editor"
+              data-activity-id="activity_2"
+            >
+
+              <header class="activity-editor__header">
+
+                <div>
+
+                  <span class="activity-editor__number">
+                    ACTIVITY 02
+                  </span>
+
+                  <h4>
+                    활동 2
+                  </h4>
+
+                </div>
+
+              </header>
+
+
+
+              <!-- 활동 2 제목 -->
+
+              <label class="field field--full">
+
+                <span class="field__label">
+                  활동 제목
+                </span>
+
+                <input
+                  type="text"
+                  id="activity-2-title"
+                  class="activity-title-input"
+                  data-activity-field="title"
+                  maxlength="120"
+                  placeholder="예: 생활 속 스마트 장치 제작"
+                />
+
+              </label>
+
+
+
+              <!-- 활동 2 내용 -->
+
+              <label class="field field--full">
+
+                <div class="field__label-row">
+
+                  <span class="field__label">
+                    활동 내용
+                  </span>
+
+                  <span
+                    id="activity-2-count"
+                    class="character-count"
+                  >
+                    0자
+                  </span>
+
+                </div>
+
+                <textarea
+                  id="activity-2-content"
+                  class="activity-content-input"
+                  data-activity-field="content"
+                  maxlength="3000"
+                  rows="6"
+                  placeholder="진행한 활동을 입력해 주세요."
+                ></textarea>
+
+              </label>
+
+
+
+              <!-- 활동 2 사진 -->
+
+              <div class="activity-photo-section">
+
+                <div class="subheading">
+
+                  <div>
+
+                    <strong>
+                      활동 사진
+                    </strong>
+
+                    <span>
+                      기본 2장
+                    </span>
+
+                  </div>
+
+                </div>
+
+
+                <div class="activity-photo-grid">
+
+
+                  <!-- 사진 1 -->
+
+                  <div
+                    class="photo-editor-card"
+                    data-photo-slot="activity_2_photo_1"
+                  >
+
+                    <button
+                      type="button"
+                      class="photo-editor-card__preview"
+                      data-photo-select="activity_2_photo_1"
+                      aria-label="활동 2 사진 1 선택"
+                    >
+
+                      <img
+                        class="photo-editor-card__image"
+                        alt=""
+                        hidden
+                      />
+
+                      <span class="photo-editor-card__empty">
+
+                        <span
+                          class="photo-editor-card__plus"
+                          aria-hidden="true"
+                        >
+                          +
+                        </span>
+
+                        <span>
+                          사진 추가
+                        </span>
+
+                      </span>
+
+                    </button>
+
+
+                    <div class="photo-editor-card__controls">
+
+                      <input
+                        type="text"
+                        class="photo-caption-input"
+                        data-photo-caption="activity_2_photo_1"
+                        maxlength="300"
+                        placeholder="사진 설명"
+                      />
+
+
+                      <div class="photo-editor-card__buttons">
+
+                        <button
+                          type="button"
+                          class="mini-btn"
+                          data-photo-crop="activity_2_photo_1"
+                          hidden
+                        >
+                          위치 조정
+                        </button>
+
+                        <button
+                          type="button"
+                          class="mini-btn mini-btn--danger"
+                          data-photo-remove="activity_2_photo_1"
+                          hidden
+                        >
+                          삭제
+                        </button>
+
+                      </div>
+
+                    </div>
+
+                  </div>
+
+
+
+                  <!-- 사진 2 -->
+
+                  <div
+                    class="photo-editor-card"
+                    data-photo-slot="activity_2_photo_2"
+                  >
+
+                    <button
+                      type="button"
+                      class="photo-editor-card__preview"
+                      data-photo-select="activity_2_photo_2"
+                      aria-label="활동 2 사진 2 선택"
+                    >
+
+                      <img
+                        class="photo-editor-card__image"
+                        alt=""
+                        hidden
+                      />
+
+                      <span class="photo-editor-card__empty">
+
+                        <span
+                          class="photo-editor-card__plus"
+                          aria-hidden="true"
+                        >
+                          +
+                        </span>
+
+                        <span>
+                          사진 추가
+                        </span>
+
+                      </span>
+
+                    </button>
+
+
+                    <div class="photo-editor-card__controls">
+
+                      <input
+                        type="text"
+                        class="photo-caption-input"
+                        data-photo-caption="activity_2_photo_2"
+                        maxlength="300"
+                        placeholder="사진 설명"
+                      />
+
+
+                      <div class="photo-editor-card__buttons">
+
+                        <button
+                          type="button"
+                          class="mini-btn"
+                          data-photo-crop="activity_2_photo_2"
+                          hidden
+                        >
+                          위치 조정
+                        </button>
+
+                        <button
+                          type="button"
+                          class="mini-btn mini-btn--danger"
+                          data-photo-remove="activity_2_photo_2"
+                          hidden
+                        >
+                          삭제
+                        </button>
+
+                      </div>
+
+                    </div>
+
+                  </div>
+
+                </div>
+
+              </div>
+
+            </article>
+
+          </div>
+
+
+
+          <!-- ==============================================
+               전체 AI
+          =============================================== -->
+
+          <div class="ai-panel">
+
+            <div class="ai-panel__info">
+
+              <div
+                class="ai-icon"
+                aria-hidden="true"
+              >
+                ✦
+              </div>
+
+
+              <div>
+
+                <strong>
+                  전체 활동 AI로 다듬기
+                </strong>
+
+                <p>
+                  작성한 모든 활동의 제목과 내용을 한 번에 자연스럽게 정리합니다.
+                </p>
+
+                <p class="ai-panel__privacy">
+                  AI에는 활동 제목과 활동 내용만 전송됩니다.
+                  담당교사, 동아리명, 사진 및 사진 설명은 전송되지 않습니다.
+                </p>
+
+                <p class="ai-panel__cache">
+                  같은 내용을 연속으로 요청하면 5분 동안 동일한 결과가 표시될 수 있습니다.
+                </p>
+
+              </div>
+
+            </div>
+
+
+            <div class="ai-panel__actions">
+
+              <button
+                type="button"
+                id="btn-ai-undo"
+                class="btn btn--ghost"
+                hidden
+              >
+                AI 수정 취소
+              </button>
+
+
+              <button
+                type="button"
+                id="btn-ai-improve-all"
+                class="btn btn--ai"
+              >
+                ✦ 전체 활동 다듬기
+              </button>
+
+            </div>
+
+          </div>
+
+        </section>
+
+
+
+        <!-- ================================================
+             3. 레이아웃 편집
+        ================================================= -->
+
+        <section class="editor-section">
+
+          <div class="section-heading">
+
+            <div class="section-heading__number">
+              3
+            </div>
+
+            <div>
+
+              <h3>
+                레이아웃 편집
+              </h3>
+
+              <p>
+                기본 양식을 그대로 사용하거나 원하는 블록을 추가하여 배치를 변경할 수 있습니다.
+              </p>
+
+            </div>
+
+          </div>
+
+
+
+          <!-- 편집 모드 -->
+
+          <div class="layout-mode-card">
+
+            <div>
+
+              <strong>
+                자유 배치 편집
+              </strong>
+
+              <p>
+                켜면 오른쪽 미리보기에서 블록을 이동하고 크기를 조절할 수 있습니다.
+              </p>
+
+            </div>
+
+
+            <label class="switch-control">
+
+              <input
+                type="checkbox"
+                id="toggle-layout-edit"
+              />
+
+              <span class="switch-control__track">
+
+                <span class="switch-control__thumb"></span>
+
+              </span>
+
+              <span class="sr-only">
+                레이아웃 편집 모드
+              </span>
+
+            </label>
+
+          </div>
+
+
+
+          <!-- 블록 추가 -->
+
+          <div
+            id="layout-tools"
+            class="layout-tools"
+            aria-disabled="true"
+          >
+
+            <div class="subheading">
+
+              <div>
+
+                <strong>
+                  블록 추가
+                </strong>
+
+                <span>
+                  필요한 요소만 추가하세요.
+                </span>
+
+              </div>
+
+            </div>
+
+
+            <div class="block-add-grid">
+
+              <button
+                type="button"
+                class="block-add-button"
+                data-add-block-type="subtitle"
+                disabled
+              >
+
+                <span
+                  class="block-add-button__icon"
+                  aria-hidden="true"
+                >
+                  T
+                </span>
+
+                <span>
+
+                  <strong>
+                    소제목
+                  </strong>
+
+                  <small>
+                    짧은 제목 블록
+                  </small>
+
+                </span>
+
+              </button>
+
+
+              <button
+                type="button"
+                class="block-add-button"
+                data-add-block-type="text"
+                disabled
+              >
+
+                <span
+                  class="block-add-button__icon"
+                  aria-hidden="true"
+                >
+                  ≡
+                </span>
+
+                <span>
+
+                  <strong>
+                    텍스트
+                  </strong>
+
+                  <small>
+                    자유 설명 글
+                  </small>
+
+                </span>
+
+              </button>
+
+
+              <button
+                type="button"
+                class="block-add-button"
+                data-add-block-type="photo"
+                disabled
+              >
+
+                <span
+                  class="block-add-button__icon"
+                  aria-hidden="true"
+                >
+                  ▧
+                </span>
+
+                <span>
+
+                  <strong>
+                    사진
+                  </strong>
+
+                  <small>
+                    사진만 표시
+                  </small>
+
+                </span>
+
+              </button>
+
+
+              <button
+                type="button"
+                class="block-add-button"
+                data-add-block-type="photo-caption"
+                disabled
+              >
+
+                <span
+                  class="block-add-button__icon"
+                  aria-hidden="true"
+                >
+                  ▣
+                </span>
+
+                <span>
+
+                  <strong>
+                    사진 + 설명
+                  </strong>
+
+                  <small>
+                    캡션이 있는 사진
+                  </small>
+
+                </span>
+
+              </button>
+
+            </div>
+
+          </div>
+
+
+
+          <!-- 선택된 블록 설정 -->
+
+          <div
+            id="block-inspector"
+            class="block-inspector"
+            hidden
+          >
+
+            <div class="subheading">
+
+              <div>
+
+                <strong>
+                  선택한 블록
+                </strong>
+
+                <span id="selected-block-label">
+                  -
+                </span>
+
+              </div>
+
+            </div>
+
+
+            <div
+              id="block-inspector-content"
+              class="block-inspector__content"
+            >
+            </div>
+
+
+            <div class="block-inspector__actions">
+
+              <button
+                type="button"
+                id="btn-block-send-back"
+                class="mini-btn"
+              >
+                뒤로
+              </button>
+
+
+              <button
+                type="button"
+                id="btn-block-bring-front"
+                class="mini-btn"
+              >
+                앞으로
+              </button>
+
+
+              <button
+                type="button"
+                id="btn-block-delete"
+                class="mini-btn mini-btn--danger"
+              >
+                블록 삭제
+              </button>
+
+            </div>
+
+          </div>
+
+
+
+          <!-- 레이아웃 초기화 -->
+
+          <div class="layout-reset">
+
+            <div>
+
+              <strong>
+                기본 배치로 돌아가기
+              </strong>
+
+              <p>
+                입력한 글과 사진은 유지하고 위치와 크기만 기본 양식으로 되돌립니다.
+              </p>
+
+            </div>
+
+
+            <button
+              type="button"
+              id="btn-layout-reset"
+              class="btn btn--ghost"
+            >
+              레이아웃 초기화
+            </button>
+
+          </div>
+
+        </section>
+
+
+
+        <!-- 편집 하단 여백 -->
+
+        <div
+          class="editor-bottom-space"
+          aria-hidden="true"
+        ></div>
+
+      </div>
+
+    </section>
+
+
+
+
+    <!-- ====================================================
+         오른쪽 미리보기
+    ===================================================== -->
+
+    <aside
+      class="preview-pane"
+      aria-label="전시자료 미리보기"
+    >
+
+
+      <!-- 미리보기 상단 -->
+
+      <div class="preview-toolbar">
+
+        <div>
+
+          <strong>
+            미리보기
+          </strong>
+
+          <span id="paper-size-label">
+            A4 세로
+          </span>
+
+        </div>
+
+
+        <div class="preview-toolbar__actions">
 
           <button
             type="button"
-            id="btn-ai-improve"
-            class="btn btn--ai btn--full"
+            id="btn-zoom-out"
+            class="icon-btn"
+            aria-label="미리보기 축소"
+            title="축소"
           >
-            AI로 내용 다듬기
+            −
           </button>
 
-          <p class="field-help">
-            같은 내용을 연속으로 요청하면 5분 동안 동일한 결과가 표시될 수 있습니다.
-          </p>
-        </section>
 
-        <!-- 사진 편집 -->
-        <section class="editor-section">
-          <h3 class="editor-section__title">사진 편집</h3>
+          <span
+            id="zoom-label"
+            class="zoom-label"
+          >
+            50%
+          </span>
 
-          <div class="field">
-            <span class="field__label">사진 배치</span>
 
-            <div class="layout-options" role="radiogroup" aria-label="사진 배치">
-              <label class="layout-option">
-                <input type="radio" name="photoLayout" value="1" />
-                <span>1장</span>
-              </label>
+          <button
+            type="button"
+            id="btn-zoom-in"
+            class="icon-btn"
+            aria-label="미리보기 확대"
+            title="확대"
+          >
+            +
+          </button>
 
-              <label class="layout-option">
-                <input type="radio" name="photoLayout" value="2" checked />
-                <span>2장</span>
-              </label>
+        </div>
 
-              <label class="layout-option">
-                <input type="radio" name="photoLayout" value="3" />
-                <span>3장</span>
-              </label>
+      </div>
 
-              <label class="layout-option">
-                <input type="radio" name="photoLayout" value="4" />
-                <span>4장</span>
-              </label>
+
+
+      <!-- A4 출력물 영역 -->
+
+      <div class="preview-stage">
+
+        <div
+          id="poster-wrapper"
+          class="poster-wrapper"
+        >
+
+          <article
+            id="poster-canvas"
+            class="poster"
+            data-club-type="autonomous"
+            data-layout-editing="false"
+          >
+
+
+            <!-- ==========================================
+                 포스터 상단
+            =========================================== -->
+
+            <header class="poster-header">
+
+              <div class="poster-header__eyebrow">
+                2026 동아리 활동 전시
+              </div>
+
+
+              <div class="poster-header__main">
+
+                <h1
+                  id="preview-club-name"
+                  class="poster-club-name"
+                  data-placeholder="동아리명"
+                >
+                </h1>
+
+
+                <div class="poster-header__meta">
+
+                  <span
+                    id="preview-club-type"
+                    class="poster-type-badge"
+                  >
+                    자율동아리
+                  </span>
+
+
+                  <span class="poster-teacher">
+
+                    담당교사
+
+                    <strong
+                      id="preview-teacher"
+                      data-placeholder="이름"
+                    >
+                    </strong>
+
+                  </span>
+
+                </div>
+
+              </div>
+
+            </header>
+
+
+
+            <!-- ==========================================
+                 자유 레이아웃 캔버스
+            =========================================== -->
+
+            <section
+              id="layout-canvas"
+              class="layout-canvas"
+              aria-label="전시자료 내용"
+            >
+
+              <!--
+                script.js에서 기본 블록을 생성한다.
+
+                기본 배치:
+
+                활동 1
+                - 활동 제목
+                - 활동 내용
+                - 사진 1
+                - 사진 2
+
+                활동 2
+                - 활동 제목
+                - 활동 내용
+                - 사진 1
+                - 사진 2
+
+                이후 사용자가 블록을 추가하면
+                같은 영역 안에 동적으로 추가한다.
+              -->
+
+            </section>
+
+
+            <!-- 편집 모드용 숨은 격자 -->
+
+            <div
+              id="layout-grid-guide"
+              class="layout-grid-guide"
+              aria-hidden="true"
+            >
             </div>
-          </div>
 
-          <div id="photo-editor-list" class="photo-editor-list">
-            <!-- script.js에서 선택된 레이아웃에 맞춰 사진 편집 항목 생성 -->
-          </div>
+          </article>
+
+        </div>
+
+      </div>
+
+
+
+      <!-- 미리보기 안내 -->
+
+      <div class="preview-footer">
+
+        <span
+          class="preview-footer__dot"
+          aria-hidden="true"
+        ></span>
+
+        <span id="preview-footer-message">
+          입력한 내용이 실시간으로 반영됩니다.
+        </span>
+
+      </div>
+
+    </aside>
+
+  </main>
+
+
+
+  <!-- ======================================================
+       공통 사진 파일 선택
+  ======================================================= -->
+
+  <input
+    type="file"
+    id="photo-file-input"
+    accept="image/jpeg,image/png,image/webp"
+    hidden
+  />
+
+
+
+  <!-- ======================================================
+       동적 레이아웃 블록 Template
+  ======================================================= -->
+
+  <template id="layout-block-template">
+
+    <div
+      class="layout-block"
+      tabindex="0"
+    >
+
+      <div class="layout-block__content">
+      </div>
+
+
+      <!-- 편집 모드에서만 표시 -->
+
+      <button
+        type="button"
+        class="layout-block__move-handle"
+        aria-label="블록 이동"
+        title="드래그하여 이동"
+      >
+        ⋮⋮
+      </button>
+
+
+      <div
+        class="layout-block__resize-handle"
+        aria-hidden="true"
+      >
+      </div>
+
+    </div>
+
+  </template>
+
+
+
+  <!-- ======================================================
+       기본 텍스트 블록 Template
+  ======================================================= -->
+
+  <template id="text-block-content-template">
+
+    <div class="poster-text-block">
+
+      <div
+        class="poster-text-block__text"
+      >
+      </div>
+
+    </div>
+
+  </template>
+
+
+
+  <!-- ======================================================
+       기본 소제목 블록 Template
+  ======================================================= -->
+
+  <template id="subtitle-block-content-template">
+
+    <div class="poster-subtitle-block">
+
+      <span
+        class="poster-subtitle-block__number"
+      >
+      </span>
+
+      <h2
+        class="poster-subtitle-block__title"
+      >
+      </h2>
+
+    </div>
+
+  </template>
+
+
+
+  <!-- ======================================================
+       사진 블록 Template
+  ======================================================= -->
+
+  <template id="photo-block-content-template">
+
+    <figure class="poster-photo-block">
+
+      <div class="poster-photo-block__frame">
+
+        <img
+          class="poster-photo-block__image"
+          alt=""
+          hidden
+        />
+
+
+        <div class="poster-photo-block__empty">
+
+          <span aria-hidden="true">
+            +
+          </span>
+
+          <span>
+            사진
+          </span>
+
+        </div>
+
+      </div>
+
+
+      <figcaption
+        class="poster-photo-block__caption"
+        hidden
+      >
+      </figcaption>
+
+    </figure>
+
+  </template>
+
+
+
+  <!-- ======================================================
+       클라우드 프로젝트 Dialog
+  ======================================================= -->
+
+  <dialog
+    id="cloud-dialog"
+    class="dialog cloud-dialog"
+  >
+
+    <div class="dialog__panel">
+
+      <header class="dialog__header">
+
+        <div>
+
+          <h2>
+            클라우드 불러오기
+          </h2>
+
+          <p>
+            Google Drive에 저장된 전시자료를 선택하세요.
+          </p>
+
+        </div>
+
+
+        <button
+          type="button"
+          id="btn-close-cloud-dialog"
+          class="dialog-close"
+          aria-label="닫기"
+        >
+          ×
+        </button>
+
+      </header>
+
+
+      <div class="cloud-filter">
+
+        <button
+          type="button"
+          class="filter-chip is-active"
+          data-project-filter="all"
+        >
+          전체
+        </button>
+
+
+        <button
+          type="button"
+          class="filter-chip"
+          data-project-filter="autonomous"
+        >
+          자율동아리
+        </button>
+
+
+        <button
+          type="button"
+          class="filter-chip"
+          data-project-filter="creative"
+        >
+          창체동아리
+        </button>
+
+      </div>
+
+
+      <div
+        id="cloud-project-list"
+        class="cloud-project-list"
+      >
+
+        <p class="empty-state">
+          저장된 프로젝트를 불러오는 중입니다.
+        </p>
+
+      </div>
+
+    </div>
+
+  </dialog>
+
+
+
+  <!-- ======================================================
+       사진 위치 조정 Dialog
+  ======================================================= -->
+
+  <dialog
+    id="photo-crop-dialog"
+    class="dialog crop-dialog"
+  >
+
+    <div class="dialog__panel crop-dialog__panel">
+
+      <header class="dialog__header">
+
+        <div>
+
+          <h2>
+            사진 위치 조정
+          </h2>
+
+          <p>
+            사진을 드래그하여 보이는 위치를 조절하세요.
+          </p>
+
+        </div>
+
+
+        <button
+          type="button"
+          id="btn-close-photo-dialog"
+          class="dialog-close"
+          aria-label="닫기"
+        >
+          ×
+        </button>
+
+      </header>
+
+
+      <div
+        id="crop-frame"
+        class="crop-frame"
+      >
+
+        <img
+          id="crop-image"
+          class="crop-image"
+          alt="사진 위치 조정 미리보기"
+        />
+
+      </div>
+
+
+      <div class="crop-controls">
+
+        <label class="crop-control">
+
+          <span>
+            확대
+          </span>
 
           <input
-            type="file"
-            id="photo-file-input"
-            accept="image/jpeg,image/png,image/webp"
-            multiple
-            hidden
+            type="range"
+            id="crop-zoom"
+            min="1"
+            max="4"
+            step="0.05"
+            value="1"
           />
 
-          <p class="field-help">
-            JPG, PNG, WEBP 파일을 사용할 수 있습니다. 사진은 프레임 안에서 보이는 위치만 조정합니다.
-          </p>
-        </section>
+        </label>
 
-        <!-- 프로젝트 관리 -->
-        <section class="editor-section">
-          <h3 class="editor-section__title">프로젝트 관리</h3>
-
-          <div class="editor-actions">
-            <button type="button" id="btn-reset" class="btn btn--danger btn--full">
-              전체 초기화
-            </button>
-          </div>
-
-          <p class="field-help">
-            작성 중 내용은 브라우저에 자동 저장되며, 클라우드 저장 전까지 사진과 편집 정보는 이 브라우저에서만 처리됩니다.
-          </p>
-        </section>
-      </aside>
-    </main>
-  </div>
-
-  <!-- 클라우드 불러오기 -->
-  <dialog id="cloud-dialog" class="dialog">
-    <div class="dialog__header">
-      <div>
-        <h2>클라우드 불러오기</h2>
-        <p>최근 저장한 프로젝트부터 표시됩니다.</p>
       </div>
 
-      <button
-        type="button"
-        class="icon-btn"
-        id="btn-close-cloud-dialog"
-        aria-label="닫기"
-      >
-        ×
-      </button>
+
+      <footer class="dialog__footer">
+
+        <button
+          type="button"
+          id="btn-crop-cancel"
+          class="btn btn--ghost"
+        >
+          취소
+        </button>
+
+
+        <button
+          type="button"
+          id="btn-crop-apply"
+          class="btn btn--primary"
+        >
+          적용
+        </button>
+
+      </footer>
+
     </div>
 
-    <div class="dialog__filters">
-      <button
-        type="button"
-        class="filter-chip is-active"
-        data-project-filter="all"
-      >
-        전체
-      </button>
-
-      <button
-        type="button"
-        class="filter-chip"
-        data-project-filter="autonomous"
-      >
-        자율동아리
-      </button>
-
-      <button
-        type="button"
-        class="filter-chip"
-        data-project-filter="creative"
-      >
-        창체동아리
-      </button>
-    </div>
-
-    <div id="cloud-project-list" class="project-list">
-      <p class="empty-state">저장된 프로젝트를 불러오는 중입니다.</p>
-    </div>
   </dialog>
 
-  <!-- 사진 위치 조정 -->
-  <dialog id="photo-crop-dialog" class="dialog dialog--photo">
-    <div class="dialog__header">
-      <div>
-        <h2>사진 위치 조정</h2>
-        <p>사진을 움직여 프레임 안에 보일 위치를 맞춰 주세요.</p>
-      </div>
 
-      <button
-        type="button"
-        class="icon-btn"
-        id="btn-close-photo-dialog"
-        aria-label="닫기"
-      >
-        ×
-      </button>
+
+  <!-- ======================================================
+       확인 Dialog
+  ======================================================= -->
+
+  <dialog
+    id="confirm-dialog"
+    class="dialog confirm-dialog"
+  >
+
+    <div class="dialog__panel confirm-dialog__panel">
+
+      <header class="confirm-dialog__header">
+
+        <h2 id="confirm-title">
+          확인
+        </h2>
+
+      </header>
+
+
+      <p id="confirm-message">
+      </p>
+
+
+      <footer class="dialog__footer">
+
+        <button
+          type="button"
+          id="btn-confirm-cancel"
+          class="btn btn--ghost"
+        >
+          취소
+        </button>
+
+
+        <button
+          type="button"
+          id="btn-confirm-ok"
+          class="btn btn--primary"
+        >
+          확인
+        </button>
+
+      </footer>
+
     </div>
 
-    <div class="crop-workspace">
-      <div id="crop-frame" class="crop-frame">
-        <img id="crop-image" alt="위치를 조정할 사진" />
-      </div>
-
-      <label class="field">
-        <span class="field__label">확대</span>
-        <input
-          type="range"
-          id="crop-zoom"
-          min="1"
-          max="3"
-          step="0.01"
-          value="1"
-        />
-      </label>
-    </div>
-
-    <div class="dialog__footer">
-      <button type="button" id="btn-crop-cancel" class="btn btn--ghost">
-        취소
-      </button>
-
-      <button type="button" id="btn-crop-apply" class="btn btn--primary">
-        적용
-      </button>
-    </div>
   </dialog>
 
-  <!-- 공통 확인창 -->
-  <dialog id="confirm-dialog" class="dialog dialog--small">
-    <div class="dialog__header">
-      <div>
-        <h2 id="confirm-title">확인</h2>
-        <p id="confirm-message"></p>
-      </div>
-    </div>
 
-    <div class="dialog__footer">
-      <button type="button" id="btn-confirm-cancel" class="btn btn--ghost">
-        취소
-      </button>
 
-      <button type="button" id="btn-confirm-ok" class="btn btn--danger">
-        확인
-      </button>
-    </div>
-  </dialog>
+  <!-- ======================================================
+       Toast
+  ======================================================= -->
 
-  <!-- 작업 상태 표시 -->
   <div
     id="toast"
     class="toast"
     role="status"
     aria-live="polite"
     hidden
-  ></div>
-
-  <!-- 전역 로딩 표시 -->
-  <div id="loading-overlay" class="loading-overlay" hidden>
-    <div class="loading-box">
-      <span class="spinner" aria-hidden="true"></span>
-      <p id="loading-message">처리 중입니다.</p>
-    </div>
+  >
   </div>
 
-  <script src="./script.js" defer></script>
+
+
+  <!-- ======================================================
+       전체 로딩 화면
+  ======================================================= -->
+
+  <div
+    id="loading-overlay"
+    class="loading-overlay"
+    hidden
+  >
+
+    <div class="loading-box">
+
+      <div
+        class="spinner"
+        aria-hidden="true"
+      >
+      </div>
+
+      <p id="loading-message">
+        처리 중입니다.
+      </p>
+
+    </div>
+
+  </div>
+
+
 </body>
 </html>
