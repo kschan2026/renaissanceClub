@@ -1,780 +1,696 @@
 'use strict';
 
 /**
- * 동아리 전시자료 제작 웹앱
- * ------------------------------------------------------------
- * 사용 전 반드시 아래 APPS_SCRIPT_URL에 배포된 Apps Script 웹 앱 주소를 입력한다.
- *
- * 예:
- * const APPS_SCRIPT_URL =
- *   'https://script.google.com/macros/s/배포ID/exec';
- *
- * 이 파일은 GitHub Pages의 index.html / style.css와 같은 폴더에 둔다.
+ * 동아리 전시자료 제작 웹앱 - script.js
+ * Code.gs v3 / 새 index.html / 새 style.css 기준
  */
 
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz5FpPe6BD8ikxSgIK2r5AQ9vkmh-np5WJshqNA4JlHVgCJENSFkA4oemhLkFnOMtk4/exec';
+const APPS_SCRIPT_URL = '여기에_배포된_APPS_SCRIPT_웹앱_URL_입력';
 
 const APP_CONFIG = Object.freeze({
-  TARGET_ACTIVITY_LENGTH: 400,
-  MAX_PHOTOS: 4,
-  IMAGE_MAX_DIMENSION: 1800,
-  IMAGE_JPEG_QUALITY: 0.86,
-  MAX_FRONTEND_IMAGE_BYTES: 7.5 * 1024 * 1024,
-  CLOUD_PREVIEW_PIXEL_RATIO: 2,
-  EXPORT_PIXEL_RATIO: 3,
-  LOCAL_SAVE_DELAY: 700,
-  LOCAL_DB_NAME: 'club-exhibition-editor',
-  LOCAL_DB_STORE: 'drafts',
-  LOCAL_DB_KEY: 'current-draft',
+  TARGET_ACTIVITY_LENGTH: 200,
+
+  GRID_COLUMNS: 12,
+  GRID_ROWS: 48,
+  GRID_COLUMN_GAP: 7,
+  GRID_ROW_GAP: 6,
+
+  MAX_IMAGE_DIMENSION: 1800,
+  IMAGE_JPEG_QUALITY: 0.88,
+
+  DRAFT_PREVIEW_PIXEL_RATIO: 1.5,
+  COMPLETE_PREVIEW_PIXEL_RATIO: 2,
+  DOWNLOAD_PIXEL_RATIO: 3,
+
+  MIN_PREVIEW_ZOOM: 0.35,
+  MAX_PREVIEW_ZOOM: 1.2,
+  PREVIEW_ZOOM_STEP: 0.05,
 
   HTML_TO_IMAGE_URL:
     'https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js',
 
   JSPDF_URL:
-    'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js'
+    'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js',
+
+  LOCAL_DB_NAME: 'club-exhibition-editor-v3',
+  LOCAL_DB_VERSION: 1,
+  LOCAL_STORE_NAME: 'drafts',
+  LOCAL_DRAFT_KEY: 'current',
+
+  AUTO_SAVE_DELAY: 700
 });
 
-const EMPTY_PHOTO = index => ({
-  slotId: `photo_${index + 1}`,
-  dataUrl: '',
-  fileId: '',
-  fileName: '',
-  mimeType: '',
-  caption: '',
-  crop: {
-    x: 50,
-    y: 50,
-    scale: 1
-  },
-  imageDirty: false
-});
 
-const createEmptyState = () => ({
-  id: null,
-  createdAt: null,
-  updatedAt: null,
-  type: 'autonomous',
-  clubName: '',
-  teacherName: '',
-  title: '',
-  activityText: '',
-  photoLayout: 2,
-  status: 'draft',
+/* =========================================================
+   기본 데이터
+========================================================= */
 
-  photos: Array.from(
-    { length: APP_CONFIG.MAX_PHOTOS },
-    (_, index) => EMPTY_PHOTO(index)
-  )
-});
-
-let state = createEmptyState();
-
-let localSaveTimer = null;
-let currentPhotoTargetIndex = 0;
-
-let currentCropIndex = null;
-let cropWorking = null;
-let cropDrag = null;
-
-let toastTimer = null;
-let confirmResolver = null;
-
-let previewZoom = 1;
-let uiInitialized = false;
-
-const $ = selector => document.querySelector(selector);
-const $$ = selector => [...document.querySelectorAll(selector)];
-
-const elements = {};
-
-document.addEventListener('DOMContentLoaded', init);
-
-
-
-/* ============================================================
-   초기화
-============================================================ */
-
-async function init() {
-  cacheElements();
-  bindEvents();
-
-  clearPreviewPlaceholderText();
-  renderAll();
-
-  /*
-   * PNG/PDF 저장 라이브러리는 화면을 연 직후 미리 불러온다.
-   * 실패하더라도 편집 기능 자체에는 영향을 주지 않는다.
-   */
-  loadExportLibraries().catch(error => {
-    console.warn(
-      '내보내기 라이브러리 사전 로드 실패:',
-      error
-    );
-  });
-
-  /*
-   * 브라우저에 이전 작성 내용이 남아 있으면 복원한다.
-   */
-  try {
-    const localState = await loadLocalDraft();
-
-    if (
-      localState &&
-      hasMeaningfulContent(localState)
-    ) {
-      state = normalizeState(localState);
-
-      renderAll();
-
-      setSaveStatus(
-        '브라우저 자동저장본'
-      );
-
-      showToast(
-        '이 브라우저에 자동 저장된 작업을 불러왔습니다.'
-      );
+function createDefaultActivities() {
+  return [
+    {
+      id: 'activity_1',
+      title: '',
+      content: ''
+    },
+    {
+      id: 'activity_2',
+      title: '',
+      content: ''
     }
-  } catch (error) {
-    console.warn(
-      '로컬 자동저장 불러오기 실패:',
-      error
-    );
-  }
-
-  /*
-   * 첫 화면에서는 A4가 화면 안에 적당히 들어오도록 축소한다.
-   */
-  requestAnimationFrame(() => {
-    fitPreviewToWindow();
-
-    uiInitialized = true;
-  });
+  ];
 }
 
 
+function createDefaultBlocks() {
+  return [
 
-/* ============================================================
-   DOM 요소 저장
-============================================================ */
-
-function cacheElements() {
-  Object.assign(
-    elements,
     {
-      poster:
-        $('#poster-canvas'),
+      id: 'activity_1_title',
+      type: 'activityTitle',
+      activityId: 'activity_1',
 
-      paperStage:
-        $('.paper-stage'),
+      x: 1,
+      y: 1,
+      w: 12,
+      h: 3,
 
-      saveStatus:
-        $('#save-status'),
+      z: 1,
+      locked: true
+    },
 
-      zoomLabel:
-        $('#zoom-label'),
+    {
+      id: 'activity_1_content',
+      type: 'activityContent',
+      activityId: 'activity_1',
 
-      previewClubName:
-        $('#preview-club-name'),
+      x: 1,
+      y: 5,
+      w: 6,
+      h: 12,
 
-      previewClubType:
-        $('#preview-club-type'),
+      z: 1,
+      locked: true
+    },
 
-      previewTeacher:
-        $('#preview-teacher'),
+    {
+      id: 'activity_1_photo_1_block',
+      type: 'photo',
+      slotId: 'activity_1_photo_1',
 
-      previewTitle:
-        $('#preview-title'),
+      x: 8,
+      y: 5,
+      w: 5,
+      h: 6,
 
-      previewActivity:
-        $('#preview-activity'),
+      z: 1,
+      locked: true
+    },
 
-      inputClubName:
-        $('#input-club-name'),
+    {
+      id: 'activity_1_photo_2_block',
+      type: 'photo',
+      slotId: 'activity_1_photo_2',
 
-      inputTeacher:
-        $('#input-teacher'),
+      x: 8,
+      y: 12,
+      w: 5,
+      h: 6,
 
-      inputTitle:
-        $('#input-title'),
+      z: 1,
+      locked: true
+    },
 
-      inputActivity:
-        $('#input-activity'),
+    {
+      id: 'activity_2_title',
+      type: 'activityTitle',
+      activityId: 'activity_2',
 
-      activityCount:
-        $('#activity-count'),
+      x: 1,
+      y: 20,
+      w: 12,
+      h: 3,
 
-      photoGrid:
-        $('#photo-grid'),
+      z: 1,
+      locked: true
+    },
 
-      photoCards:
-        $$('.photo-card'),
+    {
+      id: 'activity_2_photo_1_block',
+      type: 'photo',
+      slotId: 'activity_2_photo_1',
 
-      photoEditorList:
-        $('#photo-editor-list'),
+      x: 1,
+      y: 24,
+      w: 5,
+      h: 6,
 
-      photoFileInput:
-        $('#photo-file-input'),
+      z: 1,
+      locked: true
+    },
 
-      cloudDialog:
-        $('#cloud-dialog'),
+    {
+      id: 'activity_2_photo_2_block',
+      type: 'photo',
+      slotId: 'activity_2_photo_2',
 
-      cloudProjectList:
-        $('#cloud-project-list'),
+      x: 1,
+      y: 31,
+      w: 5,
+      h: 6,
 
-      photoCropDialog:
-        $('#photo-crop-dialog'),
+      z: 1,
+      locked: true
+    },
 
-      cropFrame:
-        $('#crop-frame'),
+    {
+      id: 'activity_2_content',
+      type: 'activityContent',
+      activityId: 'activity_2',
 
-      cropImage:
-        $('#crop-image'),
+      x: 7,
+      y: 24,
+      w: 6,
+      h: 13,
 
-      cropZoom:
-        $('#crop-zoom'),
-
-      confirmDialog:
-        $('#confirm-dialog'),
-
-      confirmTitle:
-        $('#confirm-title'),
-
-      confirmMessage:
-        $('#confirm-message'),
-
-      toast:
-        $('#toast'),
-
-      loadingOverlay:
-        $('#loading-overlay'),
-
-      loadingMessage:
-        $('#loading-message')
+      z: 1,
+      locked: true
     }
+  ];
+}
+
+
+function createEmptyState() {
+  return {
+    id: null,
+
+    type: 'autonomous',
+
+    clubName: '',
+    teacherName: '',
+
+    activities: createDefaultActivities(),
+
+    blocks: createDefaultBlocks(),
+
+    photos: [],
+
+    status: 'draft',
+
+    createdAt: null,
+    updatedAt: null,
+
+    selectedBlockId: null,
+
+    layoutEditing: false,
+
+    aiUndoSnapshot: null
+  };
+}
+
+
+/* =========================================================
+   전역 상태
+========================================================= */
+
+let state = createEmptyState();
+
+let previewZoom = 0.5;
+
+let currentPhotoSlot = null;
+
+let currentCropSlot = null;
+
+let cropWorkingState = null;
+
+let cropPointerState = null;
+
+let layoutPointerState = null;
+
+let isDirty = false;
+
+let autoSaveTimer = null;
+
+let toastTimer = null;
+
+let confirmResolver = null;
+
+let projectFilter = 'all';
+
+let cachedProjects = [];
+
+
+const dom = {};
+
+
+/* =========================================================
+   초기화
+========================================================= */
+
+document.addEventListener(
+  'DOMContentLoaded',
+  init
+);
+
+
+async function init() {
+  cacheDom();
+
+  bindEvents();
+
+  const restored =
+    await restoreLocalDraft();
+
+
+  if (restored) {
+    state =
+      normalizeLoadedState(
+        restored
+      );
+
+    showToast(
+      '브라우저에 임시 저장된 작업을 복구했습니다.',
+      'success'
+    );
+  }
+
+
+  applyStateToEditor();
+
+  renderAll();
+
+
+  requestAnimationFrame(
+    fitPreviewToWindow
+  );
+
+
+  setSaveStatus(
+    restored
+      ? '브라우저 임시저장 복구'
+      : '새 작업',
+
+    restored
+      ? 'saved'
+      : ''
   );
 }
 
 
+/* =========================================================
+   DOM
+========================================================= */
 
-/* ============================================================
-   이벤트 연결
-============================================================ */
+function cacheDom() {
+
+  dom.saveStatus =
+    $('#save-status');
+
+
+  dom.btnNew =
+    $('#btn-new');
+
+  dom.btnLoadCloud =
+    $('#btn-load-cloud');
+
+  dom.btnSaveDraft =
+    $('#btn-save-draft');
+
+  dom.btnSaveComplete =
+    $('#btn-save-complete');
+
+  dom.btnResetContent =
+    $('#btn-reset-content');
+
+
+  dom.clubTypeInputs =
+    $$(
+      'input[name="clubType"]'
+    );
+
+  dom.clubName =
+    $('#input-club-name');
+
+  dom.teacher =
+    $('#input-teacher');
+
+
+  dom.activity1Title =
+    $('#activity-1-title');
+
+  dom.activity1Content =
+    $('#activity-1-content');
+
+  dom.activity1Count =
+    $('#activity-1-count');
+
+
+  dom.activity2Title =
+    $('#activity-2-title');
+
+  dom.activity2Content =
+    $('#activity-2-content');
+
+  dom.activity2Count =
+    $('#activity-2-count');
+
+
+  dom.btnAiImproveAll =
+    $('#btn-ai-improve-all');
+
+  dom.btnAiUndo =
+    $('#btn-ai-undo');
+
+
+  dom.layoutToggle =
+    $('#toggle-layout-edit');
+
+  dom.layoutTools =
+    $('#layout-tools');
+
+  dom.blockAddButtons =
+    $$('[data-add-block-type]');
+
+  dom.blockInspector =
+    $('#block-inspector');
+
+  dom.blockInspectorContent =
+    $('#block-inspector-content');
+
+  dom.selectedBlockLabel =
+    $('#selected-block-label');
+
+  dom.btnBlockBack =
+    $('#btn-block-send-back');
+
+  dom.btnBlockFront =
+    $('#btn-block-bring-front');
+
+  dom.btnBlockDelete =
+    $('#btn-block-delete');
+
+  dom.btnLayoutReset =
+    $('#btn-layout-reset');
+
+
+  dom.poster =
+    $('#poster-canvas');
+
+  dom.posterWrapper =
+    $('#poster-wrapper');
+
+  dom.layoutCanvas =
+    $('#layout-canvas');
+
+  dom.previewClubName =
+    $('#preview-club-name');
+
+  dom.previewClubType =
+    $('#preview-club-type');
+
+  dom.previewTeacher =
+    $('#preview-teacher');
+
+  dom.previewStage =
+    $('.preview-stage');
+
+  dom.previewFooterMessage =
+    $('#preview-footer-message');
+
+  dom.btnZoomOut =
+    $('#btn-zoom-out');
+
+  dom.btnZoomIn =
+    $('#btn-zoom-in');
+
+  dom.zoomLabel =
+    $('#zoom-label');
+
+
+  dom.photoFileInput =
+    $('#photo-file-input');
+
+
+  dom.photoCropDialog =
+    $('#photo-crop-dialog');
+
+  dom.cropFrame =
+    $('#crop-frame');
+
+  dom.cropImage =
+    $('#crop-image');
+
+  dom.cropZoom =
+    $('#crop-zoom');
+
+  dom.btnClosePhotoDialog =
+    $('#btn-close-photo-dialog');
+
+  dom.btnCropCancel =
+    $('#btn-crop-cancel');
+
+  dom.btnCropApply =
+    $('#btn-crop-apply');
+
+
+  dom.cloudDialog =
+    $('#cloud-dialog');
+
+  dom.cloudProjectList =
+    $('#cloud-project-list');
+
+  dom.btnCloseCloudDialog =
+    $('#btn-close-cloud-dialog');
+
+  dom.filterChips =
+    $$('[data-project-filter]');
+
+
+  dom.confirmDialog =
+    $('#confirm-dialog');
+
+  dom.confirmTitle =
+    $('#confirm-title');
+
+  dom.confirmMessage =
+    $('#confirm-message');
+
+  dom.btnConfirmCancel =
+    $('#btn-confirm-cancel');
+
+  dom.btnConfirmOk =
+    $('#btn-confirm-ok');
+
+
+  dom.toast =
+    $('#toast');
+
+
+  dom.loadingOverlay =
+    $('#loading-overlay');
+
+  dom.loadingMessage =
+    $('#loading-message');
+
+
+  dom.layoutBlockTemplate =
+    $('#layout-block-template');
+}
+
+
+/* =========================================================
+   이벤트
+========================================================= */
 
 function bindEvents() {
 
-  /* ----------------------------
-     상단 메뉴
-  ---------------------------- */
-
-  $('#btn-new')
-    .addEventListener(
-      'click',
-      handleNewProject
-    );
-
-  $('#btn-load-cloud')
-    .addEventListener(
-      'click',
-      openCloudDialog
-    );
+  dom.btnNew.addEventListener(
+    'click',
+    handleNewProject
+  );
 
-  $('#btn-load-example')
-    .addEventListener(
-      'click',
-      loadExample
-    );
 
-  $('#btn-save-draft')
-    .addEventListener(
-      'click',
-      () => saveProject(false)
-    );
+  dom.btnLoadCloud.addEventListener(
+    'click',
+    openCloudDialog
+  );
 
-  $('#btn-save-complete')
-    .addEventListener(
-      'click',
-      () => saveProject(true)
-    );
 
-  $('#btn-export-png')
-    .addEventListener(
-      'click',
-      exportPng
-    );
+  dom.btnSaveDraft.addEventListener(
+    'click',
+    () => saveProject(false)
+  );
 
-  $('#btn-export-pdf')
-    .addEventListener(
-      'click',
-      exportPdf
-    );
 
+  dom.btnSaveComplete.addEventListener(
+    'click',
+    () => saveProject(true)
+  );
 
-  /* ----------------------------
-     미리보기 확대 / 축소
-  ---------------------------- */
 
-  $('#btn-zoom-out')
-    .addEventListener(
-      'click',
-      () => changeZoom(-0.1)
-    );
-
-  $('#btn-zoom-in')
-    .addEventListener(
-      'click',
-      () => changeZoom(0.1)
-    );
-
-
-  /* ----------------------------
-     기본 입력
-  ---------------------------- */
-
-  elements.inputClubName
-    .addEventListener(
-      'input',
-      event => {
+  dom.btnResetContent.addEventListener(
+    'click',
+    resetContentOnly
+  );
 
-        state.clubName =
-          event.target.value;
 
-        renderTextPreview();
-
-        markChanged();
-      }
-    );
+  dom.clubTypeInputs.forEach(
+    input => {
+      input.addEventListener(
+        'change',
+        handleBasicInfoChange
+      );
+    }
+  );
 
 
-  elements.inputTeacher
-    .addEventListener(
-      'input',
-      event => {
+  dom.clubName.addEventListener(
+    'input',
+    handleBasicInfoChange
+  );
 
-        state.teacherName =
-          event.target.value;
-
-        renderTextPreview();
 
-        markChanged();
-      }
-    );
+  dom.teacher.addEventListener(
+    'input',
+    handleBasicInfoChange
+  );
 
-
-  elements.inputTitle
-    .addEventListener(
-      'input',
-      event => {
 
-        state.title =
-          event.target.value;
-
-        renderTextPreview();
+  [
+    dom.activity1Title,
+    dom.activity1Content,
+    dom.activity2Title,
+    dom.activity2Content
+  ].forEach(
+    input => {
+      input.addEventListener(
+        'input',
+        handleActivityInput
+      );
+    }
+  );
 
-        markChanged();
-      }
-    );
 
+  dom.btnAiImproveAll.addEventListener(
+    'click',
+    improveAllActivities
+  );
 
-  elements.inputActivity
-    .addEventListener(
-      'input',
-      event => {
 
-        state.activityText =
-          event.target.value;
+  dom.btnAiUndo.addEventListener(
+    'click',
+    undoAiImprove
+  );
 
-        renderTextPreview();
 
-        markChanged();
-      }
-    );
+  dom.layoutToggle.addEventListener(
+    'change',
+    handleLayoutEditingToggle
+  );
 
 
-  /* ----------------------------
-     동아리 종류
-  ---------------------------- */
+  dom.blockAddButtons.forEach(
+    button => {
 
-  $$(
-    'input[name="clubType"]'
-  )
-    .forEach(
-      input => {
-
-        input.addEventListener(
-          'change',
-          event => {
-
-            if (
-              !event.target.checked
-            ) {
-              return;
-            }
-
-            /*
-             * 이미 클라우드에 저장한 프로젝트는
-             * 종류 변경을 막는다.
-             *
-             * GS에서도 같은 검증을 한다.
-             */
-            if (
-              state.id &&
-              state.type !== event.target.value
-            ) {
-
-              showToast(
-                '클라우드에 저장된 프로젝트는 동아리 종류를 바꿀 수 없습니다. 새 프로젝트에서 변경해 주세요.',
-                'error'
-              );
-
-              renderClubType();
-
-              return;
-            }
-
-            state.type =
-              event.target.value;
-
-            renderClubType();
-
-            markChanged();
-          }
-        );
-      }
-    );
-
-
-  /* ----------------------------
-     사진 레이아웃
-  ---------------------------- */
-
-  $$(
-    'input[name="photoLayout"]'
-  )
-    .forEach(
-      input => {
-
-        input.addEventListener(
-          'change',
-          event => {
-
-            if (
-              !event.target.checked
-            ) {
-              return;
-            }
-
-            state.photoLayout =
-              Number(
-                event.target.value
-              );
-
-            renderPhotos();
-
-            markChanged();
-          }
-        );
-      }
-    );
-
-
-  /* ----------------------------
-     AI
-  ---------------------------- */
-
-  $('#btn-ai-improve')
-    .addEventListener(
-      'click',
-      improveActivityText
-    );
-
-
-  /* ----------------------------
-     전체 초기화
-  ---------------------------- */
-
-  $('#btn-reset')
-    .addEventListener(
-      'click',
-      handleReset
-    );
-
-
-  /* ----------------------------
-     출력물에서 직접 글 수정
-  ---------------------------- */
-
-  bindDirectEditing();
-
-
-  /* ----------------------------
-     사진 파일 선택
-  ---------------------------- */
-
-  elements.photoFileInput
-    .addEventListener(
-      'change',
-      handlePhotoFilesSelected
-    );
-
-
-  /* ----------------------------
-     사진 슬롯 이벤트
-  ---------------------------- */
-
-  elements.photoCards
-    .forEach(
-      (card, index) => {
-
-        const frame =
-          card.querySelector(
-            '.photo-frame'
+      button.addEventListener(
+        'click',
+        () => {
+          addBlock(
+            button.dataset.addBlockType
           );
-
-        const placeholder =
-          card.querySelector(
-            '.photo-placeholder'
-          );
-
-        const caption =
-          card.querySelector(
-            '.photo-caption'
-          );
-
-
-        /*
-         * 빈 사진 영역 클릭
-         */
-        placeholder
-          .addEventListener(
-            'click',
-            () => openPhotoPicker(index)
-          );
-
-
-        /*
-         * 사진 더블클릭 → 위치 조정
-         */
-        frame
-          .addEventListener(
-            'dblclick',
-            event => {
-
-              if (
-                state.photos[index].dataUrl
-              ) {
-
-                event.preventDefault();
-
-                openPhotoCropDialog(
-                  index
-                );
-              }
-            }
-          );
-
-
-        /*
-         * 드래그 앤 드롭
-         */
-        frame
-          .addEventListener(
-            'dragover',
-            event => {
-
-              event.preventDefault();
-
-              frame.classList.add(
-                'is-dragover'
-              );
-            }
-          );
-
-
-        frame
-          .addEventListener(
-            'dragleave',
-            () => {
-
-              frame.classList.remove(
-                'is-dragover'
-              );
-            }
-          );
-
-
-        frame
-          .addEventListener(
-            'drop',
-            async event => {
-
-              event.preventDefault();
-
-              frame.classList.remove(
-                'is-dragover'
-              );
-
-              const files = [
-                ...(
-                  event.dataTransfer.files ||
-                  []
-                )
-              ]
-                .filter(
-                  isSupportedImage
-                );
-
-
-              if (
-                !files.length
-              ) {
-
-                showToast(
-                  'JPG, PNG, WEBP 사진 파일을 넣어 주세요.',
-                  'error'
-                );
-
-                return;
-              }
-
-
-              await assignFilesFromIndex(
-                files,
-                index
-              );
-            }
-          );
-
-
-        /*
-         * 사진 설명 직접 수정
-         */
-        caption
-          .addEventListener(
-            'input',
-            event => {
-
-              state.photos[index].caption =
-                editableText(
-                  event.currentTarget
-                );
-
-              syncPhotoEditorCaption(
-                index
-              );
-
-              markChanged();
-            }
-          );
-      }
-    );
-
-
-  /* ----------------------------
-     클라우드 dialog
-  ---------------------------- */
-
-  $('#btn-close-cloud-dialog')
-    .addEventListener(
-      'click',
-      () => {
-
-        elements.cloudDialog.close();
-      }
-    );
-
-
-  $$('.filter-chip')
-    .forEach(
-      button => {
-
-        button.addEventListener(
-          'click',
-          () => {
-
-            $$('.filter-chip')
-              .forEach(
-                item => {
-
-                  item.classList.remove(
-                    'is-active'
-                  );
-                }
-              );
-
-
-            button.classList.add(
-              'is-active'
-            );
-
-
-            filterCloudProjects(
-              button.dataset.projectFilter
-            );
-          }
-        );
-      }
-    );
-
-
-  /* ----------------------------
-     사진 위치 조정 dialog
-  ---------------------------- */
-
-  $('#btn-close-photo-dialog')
-    .addEventListener(
-      'click',
-      closePhotoCropDialog
-    );
-
-  $('#btn-crop-cancel')
-    .addEventListener(
-      'click',
-      closePhotoCropDialog
-    );
-
-  $('#btn-crop-apply')
-    .addEventListener(
-      'click',
-      applyPhotoCrop
-    );
-
-
-  elements.cropZoom
-    .addEventListener(
-      'input',
-      event => {
-
-        if (
-          !cropWorking
-        ) {
-          return;
         }
-
-        cropWorking.scale =
-          clamp(
-            Number(
-              event.target.value
-            ),
-            1,
-            3
-          );
-
-        renderCropImage();
-      }
-    );
+      );
+    }
+  );
 
 
-  elements.cropFrame
-    .addEventListener(
-      'pointerdown',
-      startCropDrag
-    );
+  dom.btnBlockBack.addEventListener(
+    'click',
+    sendSelectedBlockBack
+  );
+
+
+  dom.btnBlockFront.addEventListener(
+    'click',
+    bringSelectedBlockFront
+  );
+
+
+  dom.btnBlockDelete.addEventListener(
+    'click',
+    deleteSelectedBlock
+  );
+
+
+  dom.btnLayoutReset.addEventListener(
+    'click',
+    resetLayout
+  );
+
+
+  dom.btnZoomOut.addEventListener(
+    'click',
+    () => {
+      setPreviewZoom(
+        previewZoom -
+        APP_CONFIG.PREVIEW_ZOOM_STEP
+      );
+    }
+  );
+
+
+  dom.btnZoomIn.addEventListener(
+    'click',
+    () => {
+      setPreviewZoom(
+        previewZoom +
+        APP_CONFIG.PREVIEW_ZOOM_STEP
+      );
+    }
+  );
+
+
+  dom.photoFileInput.addEventListener(
+    'change',
+    handlePhotoFileInput
+  );
+
+
+  bindBasicPhotoCards();
+
+
+  dom.btnClosePhotoDialog.addEventListener(
+    'click',
+    closeCropDialog
+  );
+
+
+  dom.btnCropCancel.addEventListener(
+    'click',
+    closeCropDialog
+  );
+
+
+  dom.btnCropApply.addEventListener(
+    'click',
+    applyCrop
+  );
+
+
+  dom.cropZoom.addEventListener(
+    'input',
+    handleCropZoom
+  );
+
+
+  dom.cropFrame.addEventListener(
+    'pointerdown',
+    startCropDrag
+  );
 
 
   window.addEventListener(
     'pointermove',
-    moveCropDrag
+    handleCropDrag
   );
 
 
@@ -784,695 +700,2151 @@ function bindEvents() {
   );
 
 
-  /* ----------------------------
-     확인 dialog
-  ---------------------------- */
-
-  $('#btn-confirm-cancel')
-    .addEventListener(
-      'click',
-      () => resolveConfirm(false)
-    );
+  dom.btnCloseCloudDialog.addEventListener(
+    'click',
+    () => {
+      dom.cloudDialog.close();
+    }
+  );
 
 
-  $('#btn-confirm-ok')
-    .addEventListener(
-      'click',
-      () => resolveConfirm(true)
-    );
+  dom.filterChips.forEach(
+    button => {
+
+      button.addEventListener(
+        'click',
+        () => {
+
+          projectFilter =
+            button.dataset.projectFilter;
 
 
-  elements.confirmDialog
-    .addEventListener(
-      'cancel',
-      event => {
+          dom.filterChips.forEach(
+            chip => {
 
-        event.preventDefault();
+              chip.classList.toggle(
+                'is-active',
+                chip === button
+              );
+            }
+          );
 
-        resolveConfirm(false);
-      }
-    );
+
+          renderCloudProjectList();
+        }
+      );
+    }
+  );
 
 
-  /* ----------------------------
-     창 크기 변경
-  ---------------------------- */
+  dom.btnConfirmCancel.addEventListener(
+    'click',
+    () => {
+      resolveConfirm(false);
+    }
+  );
+
+
+  dom.btnConfirmOk.addEventListener(
+    'click',
+    () => {
+      resolveConfirm(true);
+    }
+  );
+
+
+  dom.confirmDialog.addEventListener(
+    'cancel',
+    event => {
+
+      event.preventDefault();
+
+      resolveConfirm(false);
+    }
+  );
+
+
+  dom.photoCropDialog.addEventListener(
+    'cancel',
+    event => {
+
+      event.preventDefault();
+
+      closeCropDialog();
+    }
+  );
+
 
   window.addEventListener(
     'resize',
     debounce(
-      () => {
-
-        if (
-          previewZoom > 1
-        ) {
-          return;
-        }
-
-        fitPreviewToWindow(false);
-      },
-      180
+      fitPreviewToWindow,
+      120
     )
   );
-}
 
 
+  window.addEventListener(
+    'beforeunload',
+    event => {
 
-/* ============================================================
-   출력물 직접 편집
-============================================================ */
-
-function bindDirectEditing() {
-
-  const directFields = [
-
-    [
-      elements.previewClubName,
-      'clubName',
-      elements.inputClubName,
-      false
-    ],
-
-    [
-      elements.previewTeacher,
-      'teacherName',
-      elements.inputTeacher,
-      false
-    ],
-
-    [
-      elements.previewTitle,
-      'title',
-      elements.inputTitle,
-      false
-    ],
-
-    [
-      elements.previewActivity,
-      'activityText',
-      elements.inputActivity,
-      true
-    ]
-  ];
-
-
-  directFields.forEach(
-    (
-      [
-        editable,
-        key,
-        input,
-        multiline
-      ]
-    ) => {
-
-      editable
-        .addEventListener(
-          'input',
-          () => {
-
-            const value =
-              editableText(
-                editable
-              );
-
-            state[key] =
-              value;
-
-            input.value =
-              value;
-
-
-            if (
-              key === 'activityText'
-            ) {
-
-              updateActivityCount();
-
-              fitActivityText();
-            }
-
-
-            markChanged();
-          }
-        );
-
-
-      /*
-       * 한 줄 입력란에서 Enter로 줄바꿈하지 못하게 함.
-       */
-      if (
-        !multiline
-      ) {
-
-        editable
-          .addEventListener(
-            'keydown',
-            event => {
-
-              if (
-                event.key === 'Enter'
-              ) {
-
-                event.preventDefault();
-
-                editable.blur();
-              }
-            }
-          );
+      if (!isDirty) {
+        return;
       }
 
+      event.preventDefault();
 
-      /*
-       * 서식이 들어있는 문장을 붙여넣더라도
-       * 텍스트만 붙인다.
-       */
-      editable
-        .addEventListener(
-          'paste',
-          event => {
-
-            event.preventDefault();
-
-            const text =
-              event.clipboardData
-                .getData(
-                  'text/plain'
-                );
-
-            document.execCommand(
-              'insertText',
-              false,
-              text
-            );
-          }
-        );
+      event.returnValue = '';
     }
   );
 }
 
 
+/* =========================================================
+   기본 사진 카드 이벤트
+========================================================= */
 
-/* ============================================================
-   상태 렌더링
-============================================================ */
+function bindBasicPhotoCards() {
 
-function renderAll() {
+  $$('.photo-editor-card').forEach(
+    card => {
 
-  renderClubType();
+      const slotId =
+        card.dataset.photoSlot;
 
-  renderTextPreview();
 
-  renderPhotos();
-
-
-  elements.inputClubName.value =
-    state.clubName || '';
-
-  elements.inputTeacher.value =
-    state.teacherName || '';
-
-  elements.inputTitle.value =
-    state.title || '';
-
-  elements.inputActivity.value =
-    state.activityText || '';
-
-
-  const layoutInput =
-    $(
-      `input[name="photoLayout"][value="${Number(state.photoLayout) || 2}"]`
-    );
-
-
-  if (
-    layoutInput
-  ) {
-    layoutInput.checked =
-      true;
-  }
-
-
-  updateActivityCount();
-
-  fitActivityText();
-}
-
-
-
-function renderClubType() {
-
-  const type =
-    state.type === 'creative'
-      ? 'creative'
-      : 'autonomous';
-
-
-  state.type =
-    type;
-
-
-  const input =
-    $(
-      `input[name="clubType"][value="${type}"]`
-    );
-
-
-  if (
-    input
-  ) {
-    input.checked =
-      true;
-  }
-
-
-  elements.poster.dataset.clubType =
-    type;
-
-
-  elements.previewClubType.textContent =
-    type === 'creative'
-      ? '창체동아리'
-      : '자율동아리';
-}
-
-
-
-function renderTextPreview() {
-
-  setEditableText(
-    elements.previewClubName,
-    state.clubName
-  );
-
-
-  setEditableText(
-    elements.previewTeacher,
-    state.teacherName
-  );
-
-
-  setEditableText(
-    elements.previewTitle,
-    state.title
-  );
-
-
-  setEditableText(
-    elements.previewActivity,
-    state.activityText
-  );
-
-
-  updateActivityCount();
-
-
-  requestAnimationFrame(
-    fitActivityText
-  );
-}
-
-
-
-function renderPhotos() {
-
-  const layout =
-    clamp(
-      Math.round(
-        Number(
-          state.photoLayout
-        ) || 2
-      ),
-      1,
-      4
-    );
-
-
-  state.photoLayout =
-    layout;
-
-
-  elements.photoGrid.dataset.layout =
-    String(layout);
-
-
-  state.photos =
-    normalizePhotos(
-      state.photos
-    );
-
-
-  elements.photoCards
-    .forEach(
-      (card, index) => {
-
-        const photo =
-          state.photos[index];
-
-
-        const img =
-          card.querySelector(
-            '.photo-image'
-          );
-
-
-        const placeholder =
-          card.querySelector(
-            '.photo-placeholder'
-          );
-
-
-        const caption =
-          card.querySelector(
-            '.photo-caption'
-          );
-
-
-        if (
-          photo.dataUrl
-        ) {
-
-          img.src =
-            photo.dataUrl;
-
-          img.hidden =
-            false;
-
-          placeholder.hidden =
-            true;
-
-
-          applyPhotoCropStyle(
-            img,
-            photo.crop
-          );
-
-        } else {
-
-          img.removeAttribute(
-            'src'
-          );
-
-          img.hidden =
-            true;
-
-          placeholder.hidden =
-            false;
-
-
-          resetPhotoImageStyle(
-            img
-          );
-        }
-
-
-        setEditableText(
-          caption,
-          photo.caption
-        );
-      }
-    );
-
-
-  renderPhotoEditorList();
-}
-
-
-
-function renderPhotoEditorList() {
-
-  const visibleCount =
-    state.photoLayout;
-
-
-  elements.photoEditorList
-    .replaceChildren();
-
-
-  for (
-    let index = 0;
-    index < visibleCount;
-    index += 1
-  ) {
-
-    const photo =
-      state.photos[index];
-
-
-    const item =
-      document.createElement(
-        'div'
-      );
-
-
-    item.className =
-      'photo-editor-item';
-
-
-    const thumb =
-      document.createElement(
-        'div'
-      );
-
-
-    thumb.className =
-      'photo-editor-item__thumb';
-
-
-    if (
-      photo.dataUrl
-    ) {
-
-      const img =
-        document.createElement(
-          'img'
+      const previewButton =
+        card.querySelector(
+          '[data-photo-select]'
         );
 
 
-      img.src =
-        photo.dataUrl;
+      const captionInput =
+        card.querySelector(
+          '[data-photo-caption]'
+        );
 
-
-      img.alt =
-        `${index + 1}번 사진 미리보기`;
-
-
-      applyPhotoCropStyle(
-        img,
-        photo.crop
-      );
-
-
-      thumb.append(
-        img
-      );
-    }
-
-
-    const body =
-      document.createElement(
-        'div'
-      );
-
-
-    body.className =
-      'photo-editor-item__body';
-
-
-    const title =
-      document.createElement(
-        'p'
-      );
-
-
-    title.className =
-      'photo-editor-item__title';
-
-
-    title.textContent =
-      `${index + 1}번 사진`;
-
-
-    const captionInput =
-      document.createElement(
-        'input'
-      );
-
-
-    captionInput.type =
-      'text';
-
-
-    captionInput.maxLength =
-      300;
-
-
-    captionInput.placeholder =
-      '사진 설명';
-
-
-    captionInput.value =
-      photo.caption || '';
-
-
-    captionInput.dataset.photoCaptionInput =
-      String(index);
-
-
-    Object.assign(
-      captionInput.style,
-      {
-        width:
-          '100%',
-
-        height:
-          '32px',
-
-        marginBottom:
-          '7px',
-
-        padding:
-          '0 8px',
-
-        border:
-          '1px solid #d9dde3',
-
-        borderRadius:
-          '6px',
-
-        background:
-          '#fff'
-      }
-    );
-
-
-    captionInput
-      .addEventListener(
-        'input',
-        event => {
-
-          state.photos[index].caption =
-            event.target.value;
-
-
-          const directCaption =
-            elements.photoCards[index]
-              .querySelector(
-                '.photo-caption'
-              );
-
-
-          setEditableText(
-            directCaption,
-            event.target.value
-          );
-
-
-          markChanged();
-        }
-      );
-
-
-    const actions =
-      document.createElement(
-        'div'
-      );
-
-
-    actions.className =
-      'photo-editor-item__actions';
-
-
-    const addButton =
-      makeSmallButton(
-        photo.dataUrl
-          ? '사진 변경'
-          : '사진 추가'
-      );
-
-
-    addButton
-      .addEventListener(
-        'click',
-        () => openPhotoPicker(index)
-      );
-
-
-    actions.append(
-      addButton
-    );
-
-
-    if (
-      photo.dataUrl
-    ) {
 
       const cropButton =
-        makeSmallButton(
-          '위치 조정'
-        );
-
-
-      cropButton
-        .addEventListener(
-          'click',
-          () =>
-            openPhotoCropDialog(
-              index
-            )
+        card.querySelector(
+          '[data-photo-crop]'
         );
 
 
       const removeButton =
-        makeSmallButton(
-          '삭제',
-          true
+        card.querySelector(
+          '[data-photo-remove]'
         );
 
 
-      removeButton
-        .addEventListener(
-          'click',
-          () =>
-            removePhoto(
-              index
-            )
-        );
+      previewButton.addEventListener(
+        'click',
+        () => {
+          choosePhoto(slotId);
+        }
+      );
 
 
-      actions.append(
-        cropButton,
-        removeButton
+      captionInput.addEventListener(
+        'input',
+        () => {
+
+          const photo =
+            ensurePhotoRecord(
+              slotId
+            );
+
+
+          photo.caption =
+            captionInput.value;
+
+
+          markDirty();
+
+          renderAll();
+        }
+      );
+
+
+      cropButton.addEventListener(
+        'click',
+        () => {
+          openCropDialog(slotId);
+        }
+      );
+
+
+      removeButton.addEventListener(
+        'click',
+        () => {
+          removePhoto(slotId);
+        }
+      );
+
+
+      previewButton.addEventListener(
+        'dragover',
+        event => {
+
+          event.preventDefault();
+
+          previewButton.classList.add(
+            'is-dragover'
+          );
+        }
+      );
+
+
+      previewButton.addEventListener(
+        'dragleave',
+        () => {
+
+          previewButton.classList.remove(
+            'is-dragover'
+          );
+        }
+      );
+
+
+      previewButton.addEventListener(
+        'drop',
+        event => {
+
+          event.preventDefault();
+
+
+          previewButton.classList.remove(
+            'is-dragover'
+          );
+
+
+          const file =
+            event.dataTransfer?.files?.[0];
+
+
+          if (file) {
+            processPhotoFile(
+              slotId,
+              file
+            );
+          }
+        }
       );
     }
+  );
+}
 
 
-    body.append(
-      title,
-      captionInput,
-      actions
+/* =========================================================
+   기본 정보
+========================================================= */
+
+function handleBasicInfoChange() {
+
+  state.type =
+    getSelectedClubType();
+
+
+  state.clubName =
+    dom.clubName.value;
+
+
+  state.teacherName =
+    dom.teacher.value;
+
+
+  markDirty();
+
+  renderAll();
+}
+
+
+function handleActivityInput() {
+
+  const activity1 =
+    getActivity(
+      'activity_1'
     );
 
 
-    item.append(
-      thumb,
-      body
+  const activity2 =
+    getActivity(
+      'activity_2'
     );
 
 
-    elements.photoEditorList
-      .append(
-        item
+  activity1.title =
+    dom.activity1Title.value;
+
+
+  activity1.content =
+    dom.activity1Content.value;
+
+
+  activity2.title =
+    dom.activity2Title.value;
+
+
+  activity2.content =
+    dom.activity2Content.value;
+
+
+  updateActivityCounts();
+
+  markDirty();
+
+  renderAll();
+}
+
+
+function getSelectedClubType() {
+
+  return (
+    dom.clubTypeInputs.find(
+      input => input.checked
+    )?.value ||
+    'autonomous'
+  );
+}
+
+
+function applyStateToEditor() {
+
+  dom.clubTypeInputs.forEach(
+    input => {
+
+      input.checked =
+        input.value ===
+        state.type;
+    }
+  );
+
+
+  dom.clubName.value =
+    state.clubName ||
+    '';
+
+
+  dom.teacher.value =
+    state.teacherName ||
+    '';
+
+
+  const activity1 =
+    getActivity(
+      'activity_1'
+    );
+
+
+  const activity2 =
+    getActivity(
+      'activity_2'
+    );
+
+
+  dom.activity1Title.value =
+    activity1?.title ||
+    '';
+
+
+  dom.activity1Content.value =
+    activity1?.content ||
+    '';
+
+
+  dom.activity2Title.value =
+    activity2?.title ||
+    '';
+
+
+  dom.activity2Content.value =
+    activity2?.content ||
+    '';
+
+
+  dom.layoutToggle.checked =
+    Boolean(
+      state.layoutEditing
+    );
+
+
+  updateActivityCounts();
+
+  updateLayoutToolState();
+}
+
+
+function updateActivityCounts() {
+
+  dom.activity1Count.textContent =
+    `${dom.activity1Content.value.length}자`;
+
+
+  dom.activity2Count.textContent =
+    `${dom.activity2Content.value.length}자`;
+}
+
+
+/* =========================================================
+   전체 렌더링
+========================================================= */
+
+function renderAll() {
+
+  renderPosterHeader();
+
+  renderBlocks();
+
+  renderBasicPhotoCards();
+
+  renderBlockInspector();
+
+  updateLayoutToolState();
+
+  updateAiUndoButton();
+}
+
+
+function renderPosterHeader() {
+
+  dom.poster.dataset.clubType =
+    state.type;
+
+
+  dom.poster.dataset.layoutEditing =
+    String(
+      Boolean(
+        state.layoutEditing
+      )
+    );
+
+
+  dom.previewClubName.textContent =
+    state.clubName ||
+    '';
+
+
+  dom.previewClubType.textContent =
+    state.type ===
+    'creative'
+      ? '창체동아리'
+      : '자율동아리';
+
+
+  dom.previewTeacher.textContent =
+    state.teacherName ||
+    '';
+
+
+  dom.previewFooterMessage.textContent =
+    state.layoutEditing
+      ? '블록을 선택한 뒤 이동하거나 크기를 조절할 수 있습니다.'
+      : '입력한 내용이 실시간으로 반영됩니다.';
+}
+
+
+/* =========================================================
+   블록 렌더링
+========================================================= */
+
+function renderBlocks() {
+
+  dom.layoutCanvas.innerHTML =
+    '';
+
+
+  state.blocks.forEach(
+    block => {
+
+      dom.layoutCanvas.appendChild(
+        createBlockElement(
+          block
+        )
       );
+    }
+  );
+}
+
+
+function createBlockElement(block) {
+
+  const fragment =
+    dom.layoutBlockTemplate
+      .content
+      .cloneNode(true);
+
+
+  const element =
+    fragment.querySelector(
+      '.layout-block'
+    );
+
+
+  const content =
+    fragment.querySelector(
+      '.layout-block__content'
+    );
+
+
+  element.dataset.blockId =
+    block.id;
+
+
+  element.dataset.blockType =
+    block.type;
+
+
+  element.style.setProperty(
+    '--block-x',
+    block.x
+  );
+
+
+  element.style.setProperty(
+    '--block-y',
+    block.y
+  );
+
+
+  element.style.setProperty(
+    '--block-w',
+    block.w
+  );
+
+
+  element.style.setProperty(
+    '--block-h',
+    block.h
+  );
+
+
+  element.style.setProperty(
+    '--block-z',
+    block.z || 1
+  );
+
+
+  if (
+    state.selectedBlockId ===
+    block.id
+  ) {
+
+    element.classList.add(
+      'is-selected'
+    );
+  }
+
+
+  renderBlockContent(
+    block,
+    content
+  );
+
+
+  element.addEventListener(
+    'click',
+    event => {
+
+      if (
+        !state.layoutEditing
+      ) {
+        return;
+      }
+
+
+      if (
+        event.target.closest(
+          '.layout-block__move-handle, .layout-block__resize-handle'
+        )
+      ) {
+        return;
+      }
+
+
+      selectBlock(
+        block.id
+      );
+    }
+  );
+
+
+  element
+    .querySelector(
+      '.layout-block__move-handle'
+    )
+    .addEventListener(
+      'pointerdown',
+      event => {
+
+        startBlockDrag(
+          event,
+          block.id
+        );
+      }
+    );
+
+
+  element
+    .querySelector(
+      '.layout-block__resize-handle'
+    )
+    .addEventListener(
+      'pointerdown',
+      event => {
+
+        startBlockResize(
+          event,
+          block.id
+        );
+      }
+    );
+
+
+  if (
+    block.type === 'photo' ||
+    block.type === 'photo-caption'
+  ) {
+
+    const frame =
+      content.querySelector(
+        '.poster-photo-block__frame'
+      );
+
+
+    if (frame) {
+
+      frame.addEventListener(
+        'click',
+        event => {
+
+          if (
+            state.layoutEditing
+          ) {
+            return;
+          }
+
+
+          event.stopPropagation();
+
+          choosePhoto(
+            block.slotId
+          );
+        }
+      );
+
+
+      frame.addEventListener(
+        'dragover',
+        event => {
+
+          event.preventDefault();
+
+          frame.classList.add(
+            'is-dragover'
+          );
+        }
+      );
+
+
+      frame.addEventListener(
+        'dragleave',
+        () => {
+
+          frame.classList.remove(
+            'is-dragover'
+          );
+        }
+      );
+
+
+      frame.addEventListener(
+        'drop',
+        event => {
+
+          event.preventDefault();
+
+
+          frame.classList.remove(
+            'is-dragover'
+          );
+
+
+          const file =
+            event.dataTransfer?.files?.[0];
+
+
+          if (file) {
+
+            processPhotoFile(
+              block.slotId,
+              file
+            );
+          }
+        }
+      );
+    }
+  }
+
+
+  return element;
+}
+
+
+function renderBlockContent(
+  block,
+  container
+) {
+
+  switch (block.type) {
+
+    case 'activityTitle':
+
+      renderActivityTitleBlock(
+        block,
+        container
+      );
+
+      break;
+
+
+    case 'activityContent':
+
+      renderActivityContentBlock(
+        block,
+        container
+      );
+
+      break;
+
+
+    case 'subtitle':
+
+      renderSubtitleBlock(
+        block,
+        container
+      );
+
+      break;
+
+
+    case 'text':
+
+      renderTextBlock(
+        block,
+        container
+      );
+
+      break;
+
+
+    case 'photo':
+
+    case 'photo-caption':
+
+      renderPhotoBlock(
+        block,
+        container
+      );
+
+      break;
+
+
+    default:
+
+      container.textContent =
+        '';
   }
 }
 
 
+/* =========================================================
+   활동 제목 블록
+========================================================= */
 
-function makeSmallButton(
-  text,
-  danger = false
+function renderActivityTitleBlock(
+  block,
+  container
 ) {
+
+  const activity =
+    getActivity(
+      block.activityId
+    );
+
+
+  const index =
+    getActivityIndex(
+      block.activityId
+    );
+
+
+  const wrapper =
+    document.createElement(
+      'div'
+    );
+
+
+  wrapper.className =
+    'poster-activity-title';
+
+
+  const number =
+    document.createElement(
+      'span'
+    );
+
+
+  number.className =
+    'poster-activity-title__number';
+
+
+  number.textContent =
+    String(
+      index + 1
+    );
+
+
+  const title =
+    document.createElement(
+      'h2'
+    );
+
+
+  title.className =
+    'poster-activity-title__text';
+
+
+  title.textContent =
+    activity?.title ||
+    '활동 제목';
+
+
+  wrapper.append(
+    number,
+    title
+  );
+
+
+  container.appendChild(
+    wrapper
+  );
+}
+
+
+/* =========================================================
+   활동 내용 블록
+========================================================= */
+
+function renderActivityContentBlock(
+  block,
+  container
+) {
+
+  const activity =
+    getActivity(
+      block.activityId
+    );
+
+
+  const wrapper =
+    document.createElement(
+      'div'
+    );
+
+
+  wrapper.className =
+    'poster-activity-content';
+
+
+  const text =
+    document.createElement(
+      'div'
+    );
+
+
+  text.className =
+    'poster-activity-content__text';
+
+
+  text.textContent =
+    activity?.content ||
+    '활동 내용을 입력해 주세요.';
+
+
+  wrapper.appendChild(
+    text
+  );
+
+
+  container.appendChild(
+    wrapper
+  );
+}
+
+
+/* =========================================================
+   추가 소제목
+========================================================= */
+
+function renderSubtitleBlock(
+  block,
+  container
+) {
+
+  const wrapper =
+    document.createElement(
+      'div'
+    );
+
+
+  wrapper.className =
+    'poster-subtitle-block';
+
+
+  const number =
+    document.createElement(
+      'span'
+    );
+
+
+  number.className =
+    'poster-subtitle-block__number';
+
+
+  number.textContent =
+    block.marker ||
+    '•';
+
+
+  const title =
+    document.createElement(
+      'h2'
+    );
+
+
+  title.className =
+    'poster-subtitle-block__title';
+
+
+  title.textContent =
+    block.text ||
+    '소제목';
+
+
+  wrapper.append(
+    number,
+    title
+  );
+
+
+  container.appendChild(
+    wrapper
+  );
+}
+
+
+/* =========================================================
+   추가 텍스트
+========================================================= */
+
+function renderTextBlock(
+  block,
+  container
+) {
+
+  const wrapper =
+    document.createElement(
+      'div'
+    );
+
+
+  wrapper.className =
+    'poster-text-block';
+
+
+  const text =
+    document.createElement(
+      'div'
+    );
+
+
+  text.className =
+    'poster-text-block__text';
+
+
+  text.textContent =
+    block.text ||
+    '추가 텍스트';
+
+
+  wrapper.appendChild(
+    text
+  );
+
+
+  container.appendChild(
+    wrapper
+  );
+}
+
+
+/* =========================================================
+   사진 블록
+========================================================= */
+
+function renderPhotoBlock(
+  block,
+  container
+) {
+
+  const figure =
+    document.createElement(
+      'figure'
+    );
+
+
+  figure.className =
+    'poster-photo-block';
+
+
+  const frame =
+    document.createElement(
+      'div'
+    );
+
+
+  frame.className =
+    'poster-photo-block__frame';
+
+
+  const image =
+    document.createElement(
+      'img'
+    );
+
+
+  image.className =
+    'poster-photo-block__image';
+
+  image.alt = '';
+
+
+  const empty =
+    document.createElement(
+      'div'
+    );
+
+
+  empty.className =
+    'poster-photo-block__empty';
+
+
+  empty.innerHTML =
+    '<span aria-hidden="true">+</span><span>사진</span>';
+
+
+  const caption =
+    document.createElement(
+      'figcaption'
+    );
+
+
+  caption.className =
+    'poster-photo-block__caption';
+
+
+  const photo =
+    findPhoto(
+      block.slotId
+    );
+
+
+  if (
+    photo?.dataUrl
+  ) {
+
+    image.src =
+      photo.dataUrl;
+
+
+    image.hidden =
+      false;
+
+
+    empty.hidden =
+      true;
+
+
+    applyImageCropStyle(
+      image,
+      photo.crop
+    );
+
+  } else {
+
+    image.hidden =
+      true;
+
+
+    empty.hidden =
+      false;
+  }
+
+
+  frame.append(
+    image,
+    empty
+  );
+
+
+  figure.appendChild(
+    frame
+  );
+
+
+  const showCaption =
+    block.type ===
+    'photo-caption' ||
+    Boolean(
+      photo?.caption
+    );
+
+
+  if (showCaption) {
+
+    caption.hidden =
+      false;
+
+
+    caption.textContent =
+      photo?.caption ||
+      '사진 설명';
+
+
+    figure.appendChild(
+      caption
+    );
+  }
+
+
+  container.appendChild(
+    figure
+  );
+}
+
+
+/* =========================================================
+   기본 사진 편집 카드 렌더링
+========================================================= */
+
+function renderBasicPhotoCards() {
+
+  $$('.photo-editor-card').forEach(
+    card => {
+
+      const slotId =
+        card.dataset.photoSlot;
+
+
+      const photo =
+        findPhoto(
+          slotId
+        );
+
+
+      const image =
+        card.querySelector(
+          '.photo-editor-card__image'
+        );
+
+
+      const empty =
+        card.querySelector(
+          '.photo-editor-card__empty'
+        );
+
+
+      const captionInput =
+        card.querySelector(
+          '[data-photo-caption]'
+        );
+
+
+      const cropButton =
+        card.querySelector(
+          '[data-photo-crop]'
+        );
+
+
+      const removeButton =
+        card.querySelector(
+          '[data-photo-remove]'
+        );
+
+
+      if (
+        photo?.dataUrl
+      ) {
+
+        image.src =
+          photo.dataUrl;
+
+
+        image.hidden =
+          false;
+
+
+        empty.hidden =
+          true;
+
+
+        applyImageCropStyle(
+          image,
+          photo.crop
+        );
+
+
+        cropButton.hidden =
+          false;
+
+
+        removeButton.hidden =
+          false;
+
+      } else {
+
+        image.removeAttribute(
+          'src'
+        );
+
+
+        image.hidden =
+          true;
+
+
+        empty.hidden =
+          false;
+
+
+        cropButton.hidden =
+          true;
+
+
+        removeButton.hidden =
+          true;
+      }
+
+
+      captionInput.value =
+        photo?.caption ||
+        '';
+    }
+  );
+}
+
+
+/* =========================================================
+   AI 전체 다듬기
+========================================================= */
+
+async function improveAllActivities() {
+
+  const activities =
+    state.activities.map(
+      activity => ({
+        id: activity.id,
+
+        title:
+          activity.title ||
+          '',
+
+        content:
+          activity.content ||
+          ''
+      })
+    );
+
+
+  const hasAnyText =
+    activities.some(
+      activity =>
+        activity.title.trim() ||
+        activity.content.trim()
+    );
+
+
+  if (
+    !hasAnyText
+  ) {
+
+    showToast(
+      'AI로 다듬을 활동 내용을 먼저 입력해 주세요.',
+      'error'
+    );
+
+    return;
+  }
+
+
+  state.aiUndoSnapshot =
+    cloneJson(
+      state.activities
+    );
+
+
+  updateAiUndoButton();
+
+
+  showLoading(
+    '전체 활동을 다듬는 중입니다.'
+  );
+
+
+  try {
+
+    const response =
+      await callAppsScript({
+
+        action:
+          'improveActivities',
+
+        targetLength:
+          APP_CONFIG
+            .TARGET_ACTIVITY_LENGTH,
+
+        activities:
+          activities
+      });
+
+
+    if (
+      !response ||
+      !Array.isArray(
+        response.activities
+      )
+    ) {
+
+      throw new Error(
+        'AI 결과의 형식이 올바르지 않습니다.'
+      );
+    }
+
+
+    response.activities.forEach(
+      result => {
+
+        const activity =
+          getActivity(
+            result.id
+          );
+
+
+        if (
+          !activity
+        ) {
+          return;
+        }
+
+
+        activity.title =
+          String(
+            result.title ||
+            ''
+          );
+
+
+        activity.content =
+          String(
+            result.content ||
+            ''
+          );
+      }
+    );
+
+
+    applyStateToEditor();
+
+    markDirty();
+
+    renderAll();
+
+
+    const modelText =
+      response.modelLabel
+        ? ` · ${response.modelLabel}`
+        : '';
+
+
+    const cachedText =
+      response.cached
+        ? ' · 캐시 사용'
+        : '';
+
+
+    showToast(
+      `전체 활동을 다듬었습니다${modelText}${cachedText}.`,
+      'success'
+    );
+
+  } catch (error) {
+
+    state.aiUndoSnapshot =
+      null;
+
+
+    updateAiUndoButton();
+
+
+    showToast(
+      error.message ||
+      'AI 다듬기에 실패했습니다.',
+      'error'
+    );
+
+  } finally {
+
+    hideLoading();
+  }
+}
+
+
+/* =========================================================
+   AI 취소
+========================================================= */
+
+function undoAiImprove() {
+
+  if (
+    !state.aiUndoSnapshot
+  ) {
+    return;
+  }
+
+
+  state.activities =
+    cloneJson(
+      state.aiUndoSnapshot
+    );
+
+
+  state.aiUndoSnapshot =
+    null;
+
+
+  applyStateToEditor();
+
+  markDirty();
+
+  renderAll();
+
+
+  showToast(
+    'AI 수정 전 내용으로 되돌렸습니다.',
+    'success'
+  );
+}
+
+
+function updateAiUndoButton() {
+
+  dom.btnAiUndo.hidden =
+    !state.aiUndoSnapshot;
+}
+
+
+/* =========================================================
+   레이아웃 편집 모드
+========================================================= */
+
+function handleLayoutEditingToggle() {
+
+  state.layoutEditing =
+    dom.layoutToggle.checked;
+
+
+  if (
+    !state.layoutEditing
+  ) {
+
+    state.selectedBlockId =
+      null;
+  }
+
+
+  markDirty();
+
+  renderAll();
+}
+
+
+function updateLayoutToolState() {
+
+  const enabled =
+    Boolean(
+      state.layoutEditing
+    );
+
+
+  dom.layoutTools.setAttribute(
+    'aria-disabled',
+    String(
+      !enabled
+    )
+  );
+
+
+  dom.blockAddButtons.forEach(
+    button => {
+
+      button.disabled =
+        !enabled;
+    }
+  );
+}
+
+
+function selectBlock(blockId) {
+
+  state.selectedBlockId =
+    blockId;
+
+
+  renderAll();
+}
+
+
+function getSelectedBlock() {
+
+  return (
+    state.blocks.find(
+      block =>
+        block.id ===
+        state.selectedBlockId
+    ) ||
+    null
+  );
+}
+
+
+/* =========================================================
+   블록 추가
+========================================================= */
+
+function addBlock(type) {
+
+  if (
+    !state.layoutEditing
+  ) {
+    return;
+  }
+
+
+  const id =
+    createClientId(
+      'block'
+    );
+
+
+  let block;
+
+
+  if (
+    type ===
+    'subtitle'
+  ) {
+
+    block = {
+
+      id,
+
+      type:
+        'subtitle',
+
+      text:
+        '새 소제목',
+
+      marker:
+        '•',
+
+      x:
+        1,
+
+      y:
+        39,
+
+      w:
+        6,
+
+      h:
+        3,
+
+      z:
+        getNextZ(),
+
+      locked:
+        false
+    };
+
+  } else if (
+    type ===
+    'text'
+  ) {
+
+    block = {
+
+      id,
+
+      type:
+        'text',
+
+      text:
+        '추가 내용을 입력해 주세요.',
+
+      x:
+        1,
+
+      y:
+        39,
+
+      w:
+        6,
+
+      h:
+        7,
+
+      z:
+        getNextZ(),
+
+      locked:
+        false
+    };
+
+  } else if (
+    type === 'photo' ||
+    type === 'photo-caption'
+  ) {
+
+    block = {
+
+      id,
+
+      type,
+
+      slotId:
+        createClientId(
+          'photo'
+        ),
+
+      x:
+        1,
+
+      y:
+        39,
+
+      w:
+        5,
+
+      h:
+        type ===
+        'photo-caption'
+          ? 8
+          : 7,
+
+      z:
+        getNextZ(),
+
+      locked:
+        false
+    };
+
+  } else {
+
+    return;
+  }
+
+
+  const position =
+    findAvailablePosition(
+      block.w,
+      block.h
+    );
+
+
+  if (
+    !position
+  ) {
+
+    showToast(
+      '새 블록을 놓을 빈 공간이 없습니다. 기존 블록을 이동하거나 크기를 줄여 주세요.',
+      'error'
+    );
+
+    return;
+  }
+
+
+  block.x =
+    position.x;
+
+
+  block.y =
+    position.y;
+
+
+  state.blocks.push(
+    block
+  );
+
+
+  state.selectedBlockId =
+    block.id;
+
+
+  markDirty();
+
+  renderAll();
+}
+
+
+function findAvailablePosition(
+  w,
+  h
+) {
+
+  for (
+    let y = 1;
+    y <=
+    APP_CONFIG.GRID_ROWS - h + 1;
+    y += 1
+  ) {
+
+    for (
+      let x = 1;
+      x <=
+      APP_CONFIG.GRID_COLUMNS - w + 1;
+      x += 1
+    ) {
+
+      const candidate = {
+        x,
+        y,
+        w,
+        h
+      };
+
+
+      if (
+        !hasCollision(
+          candidate,
+          null
+        )
+      ) {
+
+        return {
+          x,
+          y
+        };
+      }
+    }
+  }
+
+
+  return null;
+}
+
+
+/* =========================================================
+   블록 설정 패널
+========================================================= */
+
+function renderBlockInspector() {
+
+  const block =
+    getSelectedBlock();
+
+
+  if (
+    !state.layoutEditing ||
+    !block
+  ) {
+
+    dom.blockInspector.hidden =
+      true;
+
+    return;
+  }
+
+
+  dom.blockInspector.hidden =
+    false;
+
+
+  dom.selectedBlockLabel.textContent =
+    getBlockLabel(
+      block
+    );
+
+
+  dom.blockInspectorContent.innerHTML =
+    '';
+
+
+  if (
+    block.type ===
+    'subtitle'
+  ) {
+
+    dom.blockInspectorContent.appendChild(
+
+      createInspectorTextInput(
+        '소제목',
+        block.text || '',
+
+        value => {
+
+          block.text =
+            value;
+
+
+          markDirty();
+
+          renderBlocks();
+        }
+      )
+    );
+
+
+    dom.blockInspectorContent.appendChild(
+
+      createInspectorTextInput(
+        '표시 문자',
+        block.marker || '•',
+
+        value => {
+
+          block.marker =
+            value.slice(
+              0,
+              3
+            );
+
+
+          markDirty();
+
+          renderBlocks();
+        }
+      )
+    );
+  }
+
+
+  if (
+    block.type ===
+    'text'
+  ) {
+
+    dom.blockInspectorContent.appendChild(
+
+      createInspectorTextarea(
+        '텍스트',
+        block.text || '',
+
+        value => {
+
+          block.text =
+            value;
+
+
+          markDirty();
+
+          renderBlocks();
+        }
+      )
+    );
+  }
+
+
+  if (
+    block.type === 'photo' ||
+    block.type === 'photo-caption'
+  ) {
+
+    const photo =
+      findPhoto(
+        block.slotId
+      );
+
+
+    dom.blockInspectorContent.appendChild(
+
+      createInspectorButton(
+
+        photo?.dataUrl
+          ? '사진 변경'
+          : '사진 선택',
+
+        () => {
+
+          choosePhoto(
+            block.slotId
+          );
+        }
+      )
+    );
+
+
+    if (
+      photo?.dataUrl
+    ) {
+
+      dom.blockInspectorContent.appendChild(
+
+        createInspectorButton(
+          '사진 위치 조정',
+
+          () => {
+
+            openCropDialog(
+              block.slotId
+            );
+          }
+        )
+      );
+    }
+
+
+    if (
+      block.type ===
+      'photo-caption'
+    ) {
+
+      dom.blockInspectorContent.appendChild(
+
+        createInspectorTextInput(
+          '사진 설명',
+
+          photo?.caption ||
+          '',
+
+          value => {
+
+            const record =
+              ensurePhotoRecord(
+                block.slotId
+              );
+
+
+            record.caption =
+              value;
+
+
+            markDirty();
+
+            renderBlocks();
+          }
+        )
+      );
+    }
+  }
+
+
+  dom.blockInspectorContent.appendChild(
+
+    createInspectorRange(
+      '너비',
+      2,
+      12,
+      block.w,
+
+      value => {
+
+        resizeBlockFromInspector(
+          block,
+          value,
+          block.h
+        );
+      }
+    )
+  );
+
+
+  dom.blockInspectorContent.appendChild(
+
+    createInspectorRange(
+      '높이',
+      2,
+      18,
+      block.h,
+
+      value => {
+
+        resizeBlockFromInspector(
+          block,
+          block.w,
+          value
+        );
+      }
+    )
+  );
+
+
+  dom.btnBlockDelete.disabled =
+    Boolean(
+      block.locked
+    );
+
+
+  dom.btnBlockDelete.title =
+    block.locked
+      ? '기본 활동 블록은 삭제할 수 없습니다.'
+      : '';
+}
+
+
+function createInspectorTextInput(
+  labelText,
+  value,
+  onInput
+) {
+
+  const label =
+    document.createElement(
+      'label'
+    );
+
+
+  label.className =
+    'field';
+
+
+  const title =
+    document.createElement(
+      'span'
+    );
+
+
+  title.className =
+    'field__label';
+
+
+  title.textContent =
+    labelText;
+
+
+  const input =
+    document.createElement(
+      'input'
+    );
+
+
+  input.type =
+    'text';
+
+
+  input.value =
+    value;
+
+
+  input.addEventListener(
+    'input',
+    () => {
+
+      onInput(
+        input.value
+      );
+    }
+  );
+
+
+  label.append(
+    title,
+    input
+  );
+
+
+  return label;
+}
+
+
+function createInspectorTextarea(
+  labelText,
+  value,
+  onInput
+) {
+
+  const label =
+    document.createElement(
+      'label'
+    );
+
+
+  label.className =
+    'field field--full';
+
+
+  const title =
+    document.createElement(
+      'span'
+    );
+
+
+  title.className =
+    'field__label';
+
+
+  title.textContent =
+    labelText;
+
+
+  const textarea =
+    document.createElement(
+      'textarea'
+    );
+
+
+  textarea.rows =
+    4;
+
+
+  textarea.value =
+    value;
+
+
+  textarea.addEventListener(
+    'input',
+    () => {
+
+      onInput(
+        textarea.value
+      );
+    }
+  );
+
+
+  label.append(
+    title,
+    textarea
+  );
+
+
+  return label;
+}
+
+
+function createInspectorButton(
+  text,
+  onClick
+) {
+
+  const wrapper =
+    document.createElement(
+      'div'
+    );
+
+
+  wrapper.className =
+    'field';
+
 
   const button =
     document.createElement(
@@ -1485,198 +2857,1209 @@ function makeSmallButton(
 
 
   button.className =
-    danger
-      ? 'btn btn--danger'
-      : 'btn btn--ghost';
+    'btn btn--ghost';
 
 
   button.textContent =
     text;
 
 
-  return button;
+  button.addEventListener(
+    'click',
+    onClick
+  );
+
+
+  wrapper.appendChild(
+    button
+  );
+
+
+  return wrapper;
 }
 
 
-
-function syncPhotoEditorCaption(
-  index
+function createInspectorRange(
+  labelText,
+  min,
+  max,
+  value,
+  onInput
 ) {
 
+  const label =
+    document.createElement(
+      'label'
+    );
+
+
+  label.className =
+    'field';
+
+
+  const row =
+    document.createElement(
+      'div'
+    );
+
+
+  row.className =
+    'field__label-row';
+
+
+  const title =
+    document.createElement(
+      'span'
+    );
+
+
+  title.className =
+    'field__label';
+
+
+  title.textContent =
+    labelText;
+
+
+  const output =
+    document.createElement(
+      'span'
+    );
+
+
+  output.className =
+    'character-count';
+
+
+  output.textContent =
+    String(
+      value
+    );
+
+
+  row.append(
+    title,
+    output
+  );
+
+
   const input =
-    $(
-      `[data-photo-caption-input="${index}"]`
+    document.createElement(
+      'input'
+    );
+
+
+  input.type =
+    'range';
+
+  input.min =
+    String(min);
+
+  input.max =
+    String(max);
+
+  input.step =
+    '1';
+
+  input.value =
+    String(value);
+
+
+  input.addEventListener(
+    'input',
+    () => {
+
+      const next =
+        Number(
+          input.value
+        );
+
+
+      output.textContent =
+        String(
+          next
+        );
+
+
+      onInput(
+        next
+      );
+    }
+  );
+
+
+  label.append(
+    row,
+    input
+  );
+
+
+  return label;
+}
+
+
+function resizeBlockFromInspector(
+  block,
+  nextW,
+  nextH
+) {
+
+  const candidate = {
+
+    x:
+      block.x,
+
+    y:
+      block.y,
+
+    w:
+      clamp(
+        nextW,
+        2,
+        APP_CONFIG.GRID_COLUMNS
+      ),
+
+    h:
+      clamp(
+        nextH,
+        2,
+        18
+      )
+  };
+
+
+  candidate.w =
+    Math.min(
+      candidate.w,
+      APP_CONFIG.GRID_COLUMNS -
+      candidate.x +
+      1
+    );
+
+
+  candidate.h =
+    Math.min(
+      candidate.h,
+      APP_CONFIG.GRID_ROWS -
+      candidate.y +
+      1
     );
 
 
   if (
-    input
+    hasCollision(
+      candidate,
+      block.id
+    )
   ) {
 
-    input.value =
-      state.photos[index].caption ||
-      '';
-  }
-}
+    showToast(
+      '다른 블록과 겹쳐서 크기를 변경할 수 없습니다.',
+      'error'
+    );
 
 
+    renderBlockInspector();
 
-function updateActivityCount() {
-
-  const count =
-    (
-      state.activityText ||
-      ''
-    ).length;
-
-
-  elements.activityCount.textContent =
-    `${count.toLocaleString('ko-KR')}자`;
-}
-
-
-
-function fitActivityText() {
-
-  const el =
-    elements.previewActivity;
-
-
-  if (
-    !el
-  ) {
     return;
   }
 
 
-  let size =
-    14;
+  block.w =
+    candidate.w;
 
 
-  el.style.fontSize =
-    `${size}px`;
+  block.h =
+    candidate.h;
 
 
-  while (
-    el.scrollHeight >
-      el.clientHeight + 2 &&
-    size > 11.5
-  ) {
+  markDirty();
 
-    size -= 0.5;
-
-
-    el.style.fontSize =
-      `${size}px`;
-  }
+  renderAll();
 }
 
 
+function getBlockLabel(block) {
 
-/* ============================================================
-   사진 선택 / 압축
-============================================================ */
+  const labels = {
 
-function openPhotoPicker(
-  index
-) {
+    activityTitle:
+      '활동 제목',
 
-  currentPhotoTargetIndex =
-    index;
+    activityContent:
+      '활동 내용',
 
+    subtitle:
+      '소제목',
 
-  elements.photoFileInput.value =
-    '';
+    text:
+      '텍스트',
 
+    photo:
+      '사진',
 
-  elements.photoFileInput.click();
-}
-
-
-
-async function handlePhotoFilesSelected(
-  event
-) {
-
-  const files =
-    [
-      ...event.target.files
-    ]
-      .filter(
-        isSupportedImage
-      );
+    'photo-caption':
+      '사진 + 설명'
+  };
 
 
-  if (
-    !files.length
-  ) {
-    return;
-  }
-
-
-  await assignFilesFromIndex(
-    files,
-    currentPhotoTargetIndex
+  return (
+    labels[block.type] ||
+    block.type
   );
 }
 
 
+/* =========================================================
+   블록 드래그
+========================================================= */
 
-async function assignFilesFromIndex(
-  files,
-  startIndex
+function startBlockDrag(
+  event,
+  blockId
 ) {
 
-  const available =
-    APP_CONFIG.MAX_PHOTOS -
-    startIndex;
+  if (
+    !state.layoutEditing
+  ) {
+    return;
+  }
 
 
-  const selected =
-    files.slice(
-      0,
-      available
+  event.preventDefault();
+
+  event.stopPropagation();
+
+
+  const block =
+    state.blocks.find(
+      item =>
+        item.id ===
+        blockId
     );
 
 
+  if (
+    !block
+  ) {
+    return;
+  }
+
+
+  state.selectedBlockId =
+    block.id;
+
+
+  const element =
+    dom.layoutCanvas.querySelector(
+      `[data-block-id="${cssEscape(block.id)}"]`
+    );
+
+
+  const metrics =
+    getGridMetrics();
+
+
+  layoutPointerState = {
+
+    mode:
+      'drag',
+
+    blockId:
+      block.id,
+
+    startClientX:
+      event.clientX,
+
+    startClientY:
+      event.clientY,
+
+    startX:
+      block.x,
+
+    startY:
+      block.y,
+
+    candidateX:
+      block.x,
+
+    candidateY:
+      block.y,
+
+    metrics
+  };
+
+
+  element?.classList.add(
+    'is-dragging'
+  );
+
+
+  window.addEventListener(
+    'pointermove',
+    handleLayoutPointerMove
+  );
+
+
+  window.addEventListener(
+    'pointerup',
+    finishLayoutPointer
+  );
+
+
+  renderBlockInspector();
+}
+
+
+/* =========================================================
+   블록 크기 변경
+========================================================= */
+
+function startBlockResize(
+  event,
+  blockId
+) {
+
+  if (
+    !state.layoutEditing
+  ) {
+    return;
+  }
+
+
+  event.preventDefault();
+
+  event.stopPropagation();
+
+
+  const block =
+    state.blocks.find(
+      item =>
+        item.id ===
+        blockId
+    );
+
+
+  if (
+    !block
+  ) {
+    return;
+  }
+
+
+  state.selectedBlockId =
+    block.id;
+
+
+  const element =
+    dom.layoutCanvas.querySelector(
+      `[data-block-id="${cssEscape(block.id)}"]`
+    );
+
+
+  const metrics =
+    getGridMetrics();
+
+
+  layoutPointerState = {
+
+    mode:
+      'resize',
+
+    blockId:
+      block.id,
+
+    startClientX:
+      event.clientX,
+
+    startClientY:
+      event.clientY,
+
+    startW:
+      block.w,
+
+    startH:
+      block.h,
+
+    candidateW:
+      block.w,
+
+    candidateH:
+      block.h,
+
+    metrics
+  };
+
+
+  element?.classList.add(
+    'is-resizing'
+  );
+
+
+  window.addEventListener(
+    'pointermove',
+    handleLayoutPointerMove
+  );
+
+
+  window.addEventListener(
+    'pointerup',
+    finishLayoutPointer
+  );
+
+
+  renderBlockInspector();
+}
+
+
+function handleLayoutPointerMove(event) {
+
+  if (
+    !layoutPointerState
+  ) {
+    return;
+  }
+
+
+  const pointer =
+    layoutPointerState;
+
+
+  const block =
+    state.blocks.find(
+      item =>
+        item.id ===
+        pointer.blockId
+    );
+
+
+  if (
+    !block
+  ) {
+    return;
+  }
+
+
+  const deltaX =
+    event.clientX -
+    pointer.startClientX;
+
+
+  const deltaY =
+    event.clientY -
+    pointer.startClientY;
+
+
+  const colDelta =
+    Math.round(
+      deltaX /
+      pointer.metrics.colStep
+    );
+
+
+  const rowDelta =
+    Math.round(
+      deltaY /
+      pointer.metrics.rowStep
+    );
+
+
+  if (
+    pointer.mode ===
+    'drag'
+  ) {
+
+    const nextX =
+      clamp(
+        pointer.startX +
+        colDelta,
+
+        1,
+
+        APP_CONFIG.GRID_COLUMNS -
+        block.w +
+        1
+      );
+
+
+    const nextY =
+      clamp(
+        pointer.startY +
+        rowDelta,
+
+        1,
+
+        APP_CONFIG.GRID_ROWS -
+        block.h +
+        1
+      );
+
+
+    pointer.candidateX =
+      nextX;
+
+
+    pointer.candidateY =
+      nextY;
+
+
+    updateBlockElementPosition(
+      block.id,
+      nextX,
+      nextY,
+      block.w,
+      block.h
+    );
+
+  } else {
+
+    const maxW =
+      APP_CONFIG.GRID_COLUMNS -
+      block.x +
+      1;
+
+
+    const maxH =
+      APP_CONFIG.GRID_ROWS -
+      block.y +
+      1;
+
+
+    const nextW =
+      clamp(
+        pointer.startW +
+        colDelta,
+        2,
+        maxW
+      );
+
+
+    const nextH =
+      clamp(
+        pointer.startH +
+        rowDelta,
+        2,
+        maxH
+      );
+
+
+    pointer.candidateW =
+      nextW;
+
+
+    pointer.candidateH =
+      nextH;
+
+
+    updateBlockElementPosition(
+      block.id,
+      block.x,
+      block.y,
+      nextW,
+      nextH
+    );
+  }
+}
+
+
+function finishLayoutPointer() {
+
+  if (
+    !layoutPointerState
+  ) {
+    return;
+  }
+
+
+  const pointer =
+    layoutPointerState;
+
+
+  const block =
+    state.blocks.find(
+      item =>
+        item.id ===
+        pointer.blockId
+    );
+
+
+  window.removeEventListener(
+    'pointermove',
+    handleLayoutPointerMove
+  );
+
+
+  window.removeEventListener(
+    'pointerup',
+    finishLayoutPointer
+  );
+
+
+  layoutPointerState =
+    null;
+
+
+  if (
+    !block
+  ) {
+
+    renderAll();
+
+    return;
+  }
+
+
+  const candidate =
+    pointer.mode ===
+    'drag'
+      ? {
+          x:
+            pointer.candidateX,
+
+          y:
+            pointer.candidateY,
+
+          w:
+            block.w,
+
+          h:
+            block.h
+        }
+      : {
+          x:
+            block.x,
+
+          y:
+            block.y,
+
+          w:
+            pointer.candidateW,
+
+          h:
+            pointer.candidateH
+        };
+
+
+  if (
+    hasCollision(
+      candidate,
+      block.id
+    )
+  ) {
+
+    showToast(
+      '다른 블록과 겹치는 위치에는 놓을 수 없습니다.',
+      'error'
+    );
+
+
+    renderAll();
+
+    return;
+  }
+
+
+  Object.assign(
+    block,
+    candidate
+  );
+
+
+  markDirty();
+
+  renderAll();
+}
+
+
+function updateBlockElementPosition(
+  blockId,
+  x,
+  y,
+  w,
+  h
+) {
+
+  const element =
+    dom.layoutCanvas.querySelector(
+      `[data-block-id="${cssEscape(blockId)}"]`
+    );
+
+
+  if (
+    !element
+  ) {
+    return;
+  }
+
+
+  element.style.setProperty(
+    '--block-x',
+    x
+  );
+
+
+  element.style.setProperty(
+    '--block-y',
+    y
+  );
+
+
+  element.style.setProperty(
+    '--block-w',
+    w
+  );
+
+
+  element.style.setProperty(
+    '--block-h',
+    h
+  );
+}
+
+
+/* =========================================================
+   Grid 계산
+========================================================= */
+
+function getGridMetrics() {
+
+  const rect =
+    dom.layoutCanvas
+      .getBoundingClientRect();
+
+
+  const scaleX =
+    rect.width /
+    dom.layoutCanvas.offsetWidth;
+
+
+  const scaleY =
+    rect.height /
+    dom.layoutCanvas.offsetHeight;
+
+
+  const columnGap =
+    APP_CONFIG.GRID_COLUMN_GAP *
+    scaleX;
+
+
+  const rowGap =
+    APP_CONFIG.GRID_ROW_GAP *
+    scaleY;
+
+
+  const colWidth =
+    (
+      rect.width -
+      columnGap *
+      (
+        APP_CONFIG.GRID_COLUMNS -
+        1
+      )
+    ) /
+    APP_CONFIG.GRID_COLUMNS;
+
+
+  const rowHeight =
+    (
+      rect.height -
+      rowGap *
+      (
+        APP_CONFIG.GRID_ROWS -
+        1
+      )
+    ) /
+    APP_CONFIG.GRID_ROWS;
+
+
+  return {
+
+    colStep:
+      colWidth +
+      columnGap,
+
+    rowStep:
+      rowHeight +
+      rowGap
+  };
+}
+
+
+/* =========================================================
+   충돌 검사
+========================================================= */
+
+function hasCollision(
+  candidate,
+  ignoreBlockId
+) {
+
+  return state.blocks.some(
+    block => {
+
+      if (
+        block.id ===
+        ignoreBlockId
+      ) {
+        return false;
+      }
+
+
+      return rectanglesOverlap(
+        candidate,
+        block
+      );
+    }
+  );
+}
+
+
+function rectanglesOverlap(
+  a,
+  b
+) {
+
+  return !(
+    a.x + a.w - 1 < b.x ||
+    b.x + b.w - 1 < a.x ||
+    a.y + a.h - 1 < b.y ||
+    b.y + b.h - 1 < a.y
+  );
+}
+
+
+/* =========================================================
+   Z-index
+========================================================= */
+
+function getNextZ() {
+
+  return (
+    Math.max(
+      1,
+
+      ...state.blocks.map(
+        block =>
+          Number(
+            block.z ||
+            1
+          )
+      )
+    ) +
+    1
+  );
+}
+
+
+function bringSelectedBlockFront() {
+
+  const block =
+    getSelectedBlock();
+
+
+  if (
+    !block
+  ) {
+    return;
+  }
+
+
+  block.z =
+    getNextZ();
+
+
+  markDirty();
+
+  renderAll();
+}
+
+
+function sendSelectedBlockBack() {
+
+  const block =
+    getSelectedBlock();
+
+
+  if (
+    !block
+  ) {
+    return;
+  }
+
+
+  const minZ =
+    Math.min(
+      ...state.blocks.map(
+        item =>
+          Number(
+            item.z ||
+            1
+          )
+      )
+    );
+
+
+  block.z =
+    minZ -
+    1;
+
+
+  normalizeBlockZ();
+
+  markDirty();
+
+  renderAll();
+}
+
+
+function normalizeBlockZ() {
+
+  [...state.blocks]
+    .sort(
+      (a, b) =>
+        Number(a.z || 1) -
+        Number(b.z || 1)
+    )
+    .forEach(
+      (block, index) => {
+
+        block.z =
+          index + 1;
+      }
+    );
+}
+
+
+/* =========================================================
+   블록 삭제
+========================================================= */
+
+async function deleteSelectedBlock() {
+
+  const block =
+    getSelectedBlock();
+
+
+  if (
+    !block
+  ) {
+    return;
+  }
+
+
+  if (
+    block.locked
+  ) {
+
+    showToast(
+      '기본 활동 블록은 삭제할 수 없습니다.',
+      'error'
+    );
+
+    return;
+  }
+
+
+  const confirmed =
+    await confirmAction(
+      '블록 삭제',
+      '선택한 블록을 삭제할까요?'
+    );
+
+
+  if (
+    !confirmed
+  ) {
+    return;
+  }
+
+
+  if (
+    block.slotId
+  ) {
+
+    removePhotoRecordOnly(
+      block.slotId
+    );
+  }
+
+
+  state.blocks =
+    state.blocks.filter(
+      item =>
+        item.id !==
+        block.id
+    );
+
+
+  state.selectedBlockId =
+    null;
+
+
+  markDirty();
+
+  renderAll();
+}
+
+
+/* =========================================================
+   레이아웃 초기화
+========================================================= */
+
+async function resetLayout() {
+
+  const confirmed =
+    await confirmAction(
+
+      '레이아웃 초기화',
+
+      '기본 활동 1·2 배치로 돌아가고 추가 블록은 삭제할까요? 입력한 활동 내용과 기본 사진은 유지됩니다.'
+    );
+
+
+  if (
+    !confirmed
+  ) {
+    return;
+  }
+
+
+  const extraPhotoSlots =
+    state.blocks
+      .filter(
+        block =>
+          !block.locked &&
+          block.slotId
+      )
+      .map(
+        block =>
+          block.slotId
+      );
+
+
+  extraPhotoSlots.forEach(
+    removePhotoRecordOnly
+  );
+
+
+  state.blocks =
+    createDefaultBlocks();
+
+
+  state.selectedBlockId =
+    null;
+
+
+  markDirty();
+
+  renderAll();
+
+
+  showToast(
+    '기본 레이아웃으로 되돌렸습니다.',
+    'success'
+  );
+}
+
+
+/* =========================================================
+   사진 선택
+========================================================= */
+
+function choosePhoto(slotId) {
+
+  currentPhotoSlot =
+    slotId;
+
+
+  dom.photoFileInput.value =
+    '';
+
+
+  dom.photoFileInput.click();
+}
+
+
+async function handlePhotoFileInput() {
+
+  const file =
+    dom.photoFileInput
+      .files?.[0];
+
+
+  if (
+    !file ||
+    !currentPhotoSlot
+  ) {
+    return;
+  }
+
+
+  const slotId =
+    currentPhotoSlot;
+
+
+  currentPhotoSlot =
+    null;
+
+
+  await processPhotoFile(
+    slotId,
+    file
+  );
+}
+
+
+async function processPhotoFile(
+  slotId,
+  file
+) {
+
+  if (
+    !/^image\/(jpeg|png|webp)$/i
+      .test(
+        file.type
+      )
+  ) {
+
+    showToast(
+      'JPG, PNG, WEBP 사진만 사용할 수 있습니다.',
+      'error'
+    );
+
+    return;
+  }
+
+
   showLoading(
-    '사진을 준비하고 있습니다.'
+    '사진을 불러오는 중입니다.'
   );
 
 
   try {
 
-    for (
-      let offset = 0;
-      offset < selected.length;
-      offset += 1
+    const dataUrl =
+      await compressImageFile(
+        file
+      );
+
+
+    let photo =
+      findPhoto(
+        slotId
+      );
+
+
+    if (
+      !photo
     ) {
 
-      const index =
-        startIndex +
-        offset;
+      photo = {
 
+        slotId,
 
-      const processed =
-        await resizeImageFile(
-          selected[offset]
-        );
-
-
-      state.photos[index] = {
-        ...state.photos[index],
-
-        dataUrl:
-          processed.dataUrl,
-
-        fileId:
+        caption:
           '',
-
-        fileName:
-          selected[offset].name,
-
-        mimeType:
-          processed.mimeType,
 
         crop: {
           x: 50,
@@ -1684,52 +4067,64 @@ async function assignFilesFromIndex(
           scale: 1
         },
 
-        imageDirty:
-          true
+        dataUrl,
+
+        fileId:
+          null,
+
+        fileName:
+          file.name,
+
+        mimeType:
+          'image/jpeg'
+      };
+
+
+      state.photos.push(
+        photo
+      );
+
+    } else {
+
+      photo.dataUrl =
+        dataUrl;
+
+
+      photo.fileId =
+        null;
+
+
+      photo.fileName =
+        file.name;
+
+
+      photo.mimeType =
+        'image/jpeg';
+
+
+      photo.crop = {
+        x: 50,
+        y: 50,
+        scale: 1
       };
     }
 
 
-    const neededLayout =
-      Math.min(
-        APP_CONFIG.MAX_PHOTOS,
+    markDirty();
 
-        Math.max(
-          state.photoLayout,
-          startIndex +
-            selected.length
-        )
-      );
+    renderAll();
 
 
-    state.photoLayout =
-      neededLayout;
-
-
-    renderPhotos();
-
-
-    const radio =
-      $(
-        `input[name="photoLayout"][value="${neededLayout}"]`
-      );
-
-
-    if (
-      radio
-    ) {
-      radio.checked =
-        true;
-    }
-
-
-    markChanged();
+    showToast(
+      '사진을 추가했습니다.',
+      'success'
+    );
 
   } catch (error) {
 
     showToast(
       error.message ||
-        '사진을 처리하지 못했습니다.',
+      '사진을 처리하지 못했습니다.',
       'error'
     );
 
@@ -1740,388 +4135,268 @@ async function assignFilesFromIndex(
 }
 
 
+function findPhoto(slotId) {
 
-function isSupportedImage(
-  file
-) {
-
-  return [
-    'image/jpeg',
-    'image/png',
-    'image/webp'
-  ]
-    .includes(
-      file.type
-    );
+  return (
+    state.photos.find(
+      photo =>
+        photo.slotId ===
+        slotId
+    ) ||
+    null
+  );
 }
 
 
+function ensurePhotoRecord(slotId) {
 
-async function resizeImageFile(
-  file
-) {
+  let photo =
+    findPhoto(
+      slotId
+    );
+
 
   if (
-    !isSupportedImage(
-      file
-    )
+    !photo
   ) {
 
-    throw new Error(
-      'JPG, PNG, WEBP 파일만 사용할 수 있습니다.'
-    );
-  }
+    photo = {
 
+      slotId,
 
-  const objectUrl =
-    URL.createObjectURL(
-      file
-    );
+      caption:
+        '',
 
+      crop: {
+        x: 50,
+        y: 50,
+        scale: 1
+      },
 
-  try {
-
-    const image =
-      await loadImage(
-        objectUrl
-      );
-
-
-    const maxDimension =
-      APP_CONFIG.IMAGE_MAX_DIMENSION;
-
-
-    const ratio =
-      Math.min(
-        1,
-
-        maxDimension /
-          Math.max(
-            image.naturalWidth,
-            image.naturalHeight
-          )
-      );
-
-
-    const width =
-      Math.max(
-        1,
-
-        Math.round(
-          image.naturalWidth *
-            ratio
-        )
-      );
-
-
-    const height =
-      Math.max(
-        1,
-
-        Math.round(
-          image.naturalHeight *
-            ratio
-        )
-      );
-
-
-    const canvas =
-      document.createElement(
-        'canvas'
-      );
-
-
-    canvas.width =
-      width;
-
-
-    canvas.height =
-      height;
-
-
-    const context =
-      canvas.getContext(
-        '2d',
-        {
-          alpha: false
-        }
-      );
-
-
-    context.fillStyle =
-      '#ffffff';
-
-
-    context.fillRect(
-      0,
-      0,
-      width,
-      height
-    );
-
-
-    context.drawImage(
-      image,
-      0,
-      0,
-      width,
-      height
-    );
-
-
-    /*
-     * 학교 활동 사진은 투명 배경이 필요하지 않기 때문에
-     * JPEG로 변환하여 파일 크기를 줄인다.
-     */
-    const blob =
-      await canvasToBlob(
-        canvas,
-        'image/jpeg',
-        APP_CONFIG.IMAGE_JPEG_QUALITY
-      );
-
-
-    if (
-      !blob
-    ) {
-
-      throw new Error(
-        '사진 변환에 실패했습니다.'
-      );
-    }
-
-
-    if (
-      blob.size >
-      APP_CONFIG.MAX_FRONTEND_IMAGE_BYTES
-    ) {
-
-      throw new Error(
-        '사진 용량이 너무 큽니다. 더 작은 사진을 사용해 주세요.'
-      );
-    }
-
-
-    return {
       dataUrl:
-        await blobToDataUrl(
-          blob
-        ),
+        '',
+
+      fileId:
+        null,
+
+      fileName:
+        '',
 
       mimeType:
         'image/jpeg'
     };
 
-  } finally {
 
-    URL.revokeObjectURL(
-      objectUrl
+    state.photos.push(
+      photo
     );
   }
+
+
+  return photo;
 }
 
 
-
-/* ============================================================
+/* =========================================================
    사진 삭제
-============================================================ */
+========================================================= */
 
-function removePhoto(
-  index
-) {
-
-  const current =
-    state.photos[index];
-
-
-  state.photos[index] = {
-    ...EMPTY_PHOTO(
-      index
-    ),
-
-    caption:
-      current.caption ||
-      ''
-  };
-
-
-  renderPhotos();
-
-  markChanged();
-}
-
-
-
-/* ============================================================
-   사진 위치 조정
-============================================================ */
-
-function openPhotoCropDialog(
-  index
-) {
+async function removePhoto(slotId) {
 
   const photo =
-    state.photos[index];
+    findPhoto(
+      slotId
+    );
 
 
   if (
-    !photo ||
-    !photo.dataUrl
+    !photo
   ) {
     return;
   }
 
 
-  currentCropIndex =
-    index;
+  const confirmed =
+    await confirmAction(
+      '사진 삭제',
+      '선택한 사진을 삭제할까요?'
+    );
 
 
-  cropWorking = {
-
-    x:
-      finiteNumber(
-        photo.crop?.x,
-        50
-      ),
-
-    y:
-      finiteNumber(
-        photo.crop?.y,
-        50
-      ),
-
-    scale:
-      clamp(
-        finiteNumber(
-          photo.crop?.scale,
-          1
-        ),
-        1,
-        3
-      )
-  };
+  if (
+    !confirmed
+  ) {
+    return;
+  }
 
 
-  elements.cropImage.src =
+  removePhotoRecordOnly(
+    slotId
+  );
+
+
+  markDirty();
+
+  renderAll();
+}
+
+
+function removePhotoRecordOnly(slotId) {
+
+  state.photos =
+    state.photos.filter(
+      photo =>
+        photo.slotId !==
+        slotId
+    );
+}
+
+
+function applyImageCropStyle(
+  image,
+  crop
+) {
+
+  const normalized =
+    normalizeCrop(
+      crop
+    );
+
+
+  image.style.objectPosition =
+    `${normalized.x}% ${normalized.y}%`;
+
+
+  image.style.transform =
+    `scale(${normalized.scale})`;
+}
+
+
+/* =========================================================
+   사진 위치 조정
+========================================================= */
+
+function openCropDialog(slotId) {
+
+  const photo =
+    findPhoto(
+      slotId
+    );
+
+
+  if (
+    !photo?.dataUrl
+  ) {
+
+    showToast(
+      '먼저 사진을 추가해 주세요.',
+      'error'
+    );
+
+    return;
+  }
+
+
+  currentCropSlot =
+    slotId;
+
+
+  cropWorkingState =
+    normalizeCrop(
+      photo.crop
+    );
+
+
+  dom.cropImage.src =
     photo.dataUrl;
 
 
-  elements.cropZoom.value =
+  dom.cropZoom.value =
     String(
-      cropWorking.scale
+      cropWorkingState.scale
     );
 
 
-  renderCropImage();
+  updateCropPreview();
 
 
-  if (
-    !elements.photoCropDialog.open
-  ) {
-
-    elements.photoCropDialog.showModal();
-  }
+  dom.photoCropDialog.showModal();
 }
 
 
-
-function closePhotoCropDialog() {
-
-  currentCropIndex =
-    null;
-
-
-  cropWorking =
-    null;
-
-
-  cropDrag =
-    null;
-
+function closeCropDialog() {
 
   if (
-    elements.photoCropDialog.open
+    dom.photoCropDialog.open
   ) {
 
-    elements.photoCropDialog.close();
+    dom.photoCropDialog.close();
   }
+
+
+  currentCropSlot =
+    null;
+
+
+  cropWorkingState =
+    null;
+
+
+  cropPointerState =
+    null;
 }
 
 
-
-function applyPhotoCrop() {
+function handleCropZoom() {
 
   if (
-    currentCropIndex === null ||
-    !cropWorking
+    !cropWorkingState
   ) {
     return;
   }
 
 
-  state.photos[
-    currentCropIndex
-  ].crop = {
-    ...cropWorking
-  };
+  cropWorkingState.scale =
+    Number(
+      dom.cropZoom.value
+    );
 
 
-  renderPhotos();
-
-  markChanged();
-
-  closePhotoCropDialog();
+  updateCropPreview();
 }
 
 
-
-function renderCropImage() {
+function updateCropPreview() {
 
   if (
-    !cropWorking
+    !cropWorkingState
   ) {
     return;
   }
 
 
-  Object.assign(
-    elements.cropImage.style,
-    {
-      width:
-        '100%',
+  dom.cropImage.style.objectPosition =
+    `${cropWorkingState.x}% ${cropWorkingState.y}%`;
 
-      height:
-        '100%',
 
-      objectFit:
-        'cover',
-
-      objectPosition:
-        `${cropWorking.x}% ${cropWorking.y}%`,
-
-      transform:
-        `scale(${cropWorking.scale})`,
-
-      transformOrigin:
-        `${cropWorking.x}% ${cropWorking.y}%`
-    }
-  );
+  dom.cropImage.style.transform =
+    `scale(${cropWorkingState.scale})`;
 }
 
 
-
-function startCropDrag(
-  event
-) {
+function startCropDrag(event) {
 
   if (
-    !cropWorking
+    !cropWorkingState
   ) {
     return;
   }
 
 
-  cropDrag = {
+  event.preventDefault();
+
+
+  cropPointerState = {
 
     pointerId:
       event.pointerId,
@@ -2133,28 +4408,19 @@ function startCropDrag(
       event.clientY,
 
     startX:
-      cropWorking.x,
+      cropWorkingState.x,
 
     startY:
-      cropWorking.y
+      cropWorkingState.y
   };
-
-
-  elements.cropFrame
-    .setPointerCapture?.(
-      event.pointerId
-    );
 }
 
 
-
-function moveCropDrag(
-  event
-) {
+function handleCropDrag(event) {
 
   if (
-    !cropDrag ||
-    !cropWorking
+    !cropPointerState ||
+    !cropWorkingState
   ) {
     return;
   }
@@ -2162,68 +4428,63 @@ function moveCropDrag(
 
   if (
     event.pointerId !==
-    cropDrag.pointerId
+    cropPointerState.pointerId
   ) {
     return;
   }
 
 
   const rect =
-    elements.cropFrame
+    dom.cropFrame
       .getBoundingClientRect();
 
 
   const dx =
-    (
-      (
-        event.clientX -
-        cropDrag.startClientX
-      ) /
-      rect.width
-    ) *
-    100;
+    event.clientX -
+    cropPointerState.startClientX;
 
 
   const dy =
-    (
+    event.clientY -
+    cropPointerState.startClientY;
+
+
+  cropWorkingState.x =
+    clamp(
+      cropPointerState.startX -
       (
-        event.clientY -
-        cropDrag.startClientY
-      ) /
-      rect.height
-    ) *
-    100;
+        dx /
+        rect.width
+      ) *
+      100,
 
-
-  cropWorking.x =
-    clamp(
-      cropDrag.startX -
-        dx,
       0,
       100
     );
 
 
-  cropWorking.y =
+  cropWorkingState.y =
     clamp(
-      cropDrag.startY -
-        dy,
+      cropPointerState.startY -
+      (
+        dy /
+        rect.height
+      ) *
+      100,
+
       0,
       100
     );
 
 
-  renderCropImage();
+  updateCropPreview();
 }
 
 
-
-function endCropDrag(
-  event
-) {
+function endCropDrag(event) {
 
   if (
-    !cropDrag
+    !cropPointerState
   ) {
     return;
   }
@@ -2231,198 +4492,239 @@ function endCropDrag(
 
   if (
     event.pointerId !==
-    cropDrag.pointerId
+    cropPointerState.pointerId
   ) {
     return;
   }
 
 
-  cropDrag =
+  cropPointerState =
     null;
 }
 
 
+function applyCrop() {
 
-function applyPhotoCropStyle(
-  img,
-  crop
-) {
+  if (
+    !currentCropSlot ||
+    !cropWorkingState
+  ) {
 
-  const normalized =
-    normalizeCrop(
-      crop
+    closeCropDialog();
+
+    return;
+  }
+
+
+  const photo =
+    findPhoto(
+      currentCropSlot
     );
 
 
-  Object.assign(
-    img.style,
-    {
-      objectFit:
-        'cover',
+  if (
+    photo
+  ) {
 
-      objectPosition:
-        `${normalized.x}% ${normalized.y}%`,
+    photo.crop =
+      normalizeCrop(
+        cropWorkingState
+      );
 
-      transform:
-        `scale(${normalized.scale})`,
 
-      transformOrigin:
-        `${normalized.x}% ${normalized.y}%`
-    }
+    markDirty();
+
+    renderAll();
+  }
+
+
+  closeCropDialog();
+
+
+  showToast(
+    '사진 위치를 적용했습니다.',
+    'success'
   );
 }
 
 
+/* =========================================================
+   이미지 압축
+========================================================= */
 
-function resetPhotoImageStyle(
-  img
-) {
+function compressImageFile(file) {
 
-  Object.assign(
-    img.style,
-    {
-      objectPosition:
-        '50% 50%',
-
-      transform:
-        'none',
-
-      transformOrigin:
-        '50% 50%'
-    }
-  );
-}
-
-
-
-/* ============================================================
-   AI 활동 내용 다듬기
-============================================================ */
-
-async function improveActivityText() {
-
-  const text =
+  return new Promise(
     (
-      state.activityText ||
-      ''
-    ).trim();
+      resolve,
+      reject
+    ) => {
+
+      const reader =
+        new FileReader();
 
 
-  if (
-    !text
-  ) {
+      reader.onerror =
+        () => {
 
-    showToast(
-      '먼저 주요 활동 내용을 입력해 주세요.',
-      'error'
-    );
-
-
-    elements.inputActivity
-      .focus();
+          reject(
+            new Error(
+              '사진 파일을 읽지 못했습니다.'
+            )
+          );
+        };
 
 
-    return;
-  }
+      reader.onload =
+        () => {
+
+          const image =
+            new Image();
 
 
-  if (
-    !isAppsScriptConfigured()
-  ) {
+          image.onload =
+            () => {
 
-    showAppsScriptUrlError();
-
-    return;
-  }
+              let width =
+                image.naturalWidth;
 
 
-  showLoading(
-    'AI가 활동 내용을 다듬고 있습니다.'
+              let height =
+                image.naturalHeight;
+
+
+              const maxDimension =
+                APP_CONFIG
+                  .MAX_IMAGE_DIMENSION;
+
+
+              if (
+                Math.max(
+                  width,
+                  height
+                ) >
+                maxDimension
+              ) {
+
+                const ratio =
+                  maxDimension /
+                  Math.max(
+                    width,
+                    height
+                  );
+
+
+                width =
+                  Math.round(
+                    width *
+                    ratio
+                  );
+
+
+                height =
+                  Math.round(
+                    height *
+                    ratio
+                  );
+              }
+
+
+              const canvas =
+                document.createElement(
+                  'canvas'
+                );
+
+
+              canvas.width =
+                width;
+
+
+              canvas.height =
+                height;
+
+
+              const context =
+                canvas.getContext(
+                  '2d'
+                );
+
+
+              if (
+                !context
+              ) {
+
+                reject(
+                  new Error(
+                    '사진을 처리할 수 없습니다.'
+                  )
+                );
+
+                return;
+              }
+
+
+              context.drawImage(
+                image,
+                0,
+                0,
+                width,
+                height
+              );
+
+
+              try {
+
+                resolve(
+                  canvas.toDataURL(
+                    'image/jpeg',
+                    APP_CONFIG
+                      .IMAGE_JPEG_QUALITY
+                  )
+                );
+
+              } catch (error) {
+
+                reject(
+                  new Error(
+                    '사진을 변환하지 못했습니다.'
+                  )
+                );
+              }
+            };
+
+
+          image.onerror =
+            () => {
+
+              reject(
+                new Error(
+                  '사진 형식을 읽지 못했습니다.'
+                )
+              );
+            };
+
+
+          image.src =
+            reader.result;
+        };
+
+
+      reader.readAsDataURL(
+        file
+      );
+    }
   );
-
-
-  try {
-
-    const data =
-      await callAppsScript({
-        action:
-          'improveActivityText',
-
-        activityText:
-          text,
-
-        clubName:
-          state.clubName,
-
-        clubType:
-          state.type,
-
-        targetLength:
-          APP_CONFIG.TARGET_ACTIVITY_LENGTH
-      });
-
-
-    state.activityText =
-      data.text ||
-      text;
-
-
-    elements.inputActivity.value =
-      state.activityText;
-
-
-    renderTextPreview();
-
-    markChanged();
-
-
-    const cachedText =
-      data.cached
-        ? ' · 이전 결과 사용'
-        : '';
-
-
-    showToast(
-      `${data.modeLabel || 'AI 다듬기'} 완료 (${data.resultLength || state.activityText.length}자${cachedText})`,
-      'success'
-    );
-
-  } catch (error) {
-
-    showToast(
-      error.message ||
-        'AI 요청에 실패했습니다.',
-      'error'
-    );
-
-  } finally {
-
-    hideLoading();
-  }
 }
 
 
+/* =========================================================
+   프로젝트 저장
+========================================================= */
 
-/* ============================================================
-   클라우드 저장
-============================================================ */
-
-async function saveProject(
-  finalize
-) {
-
-  if (
-    !isAppsScriptConfigured()
-  ) {
-
-    showAppsScriptUrlError();
-
-    return;
-  }
-
+async function saveProject(finalize) {
 
   const clubName =
-    (
+    String(
       state.clubName ||
       ''
     ).trim();
@@ -2438,182 +4740,94 @@ async function saveProject(
     );
 
 
-    elements.inputClubName
-      .focus();
-
+    dom.clubName.focus();
 
     return;
   }
 
 
-  /*
-   * 완성본 저장 시에는
-   * 최소한 제목과 활동 내용이 있어야 한다.
-   */
   if (
     finalize
   ) {
 
-    if (
-      !(
-        state.title ||
-        ''
-      ).trim()
-    ) {
+    const confirmed =
+      await confirmAction(
 
-      showToast(
-        '완성본 저장 전 활동 제목을 입력해 주세요.',
-        'error'
+        '완성본 저장',
+
+        'Google Drive에 완성본을 저장하고 PNG와 PDF 파일을 내려받을까요?'
       );
 
 
-      elements.inputTitle
-        .focus();
-
-
-      return;
-    }
-
-
     if (
-      !(
-        state.activityText ||
-        ''
-      ).trim()
+      !confirmed
     ) {
-
-      showToast(
-        '완성본 저장 전 주요 활동 내용을 입력해 주세요.',
-        'error'
-      );
-
-
-      elements.inputActivity
-        .focus();
-
-
       return;
     }
   }
 
 
-  const loadingText =
-    finalize
-      ? '완성본을 저장하고 있습니다.'
-      : '작성 중인 작업을 저장하고 있습니다.';
-
-
   showLoading(
-    loadingText
-  );
 
-
-  setSaveStatus(
-    '저장 중…',
-    'saving'
+    finalize
+      ? '완성본을 저장하는 중입니다.'
+      : '작성 중인 내용을 저장하는 중입니다.'
   );
 
 
   try {
 
-    /*
-     * Drive에서 목록 확인용 미리보기이자
-     * 완성본 PNG 저장에 사용할 이미지를 만든다.
-     */
+    const previewRatio =
+      finalize
+        ? APP_CONFIG
+            .COMPLETE_PREVIEW_PIXEL_RATIO
+        : APP_CONFIG
+            .DRAFT_PREVIEW_PIXEL_RATIO;
+
+
     const previewDataUrl =
       await capturePosterDataUrl(
-        APP_CONFIG.CLOUD_PREVIEW_PIXEL_RATIO
+        previewRatio
       );
 
 
-    const request = {
+    const response =
+      await callAppsScript({
 
-      action:
-        'saveProject',
+        action:
+          'saveProject',
 
+        finalize,
 
-      project: {
+        expectedUpdatedAt:
+          state.updatedAt ||
+          null,
 
-        id:
-          state.id ||
-          undefined,
+        project:
+          buildProjectPayload(
+            finalize
+          ),
 
-        type:
-          state.type,
+        photos:
+          buildPhotosPayload(),
 
-        clubName:
-          clubName,
-
-        teacherName:
-          (
-            state.teacherName ||
-            ''
-          ).trim(),
-
-        title:
-          (
-            state.title ||
-            ''
-          ).trim(),
-
-        activityText:
-          state.activityText ||
-          '',
-
-        photoLayout:
-          state.photoLayout,
-
-        status:
-          finalize
-            ? 'completed'
-            : 'draft',
-
-        templateVersion:
-          1
-      },
+        preview: {
+          dataUrl:
+            previewDataUrl
+        }
+      });
 
 
-      photos:
-        buildPhotoSavePayload(),
-
-
-      preview: {
-        dataUrl:
-          previewDataUrl
-      },
-
-
-      finalize:
-        Boolean(
-          finalize
-        )
-    };
-
-
-    /*
-     * 기존 프로젝트 업데이트 시
-     * 덮어쓰기 충돌 방지
-     */
     if (
-      state.id &&
-      state.updatedAt
+      !response?.id
     ) {
 
-      request.expectedUpdatedAt =
-        state.updatedAt;
+      throw new Error(
+        '저장 결과를 확인할 수 없습니다.'
+      );
     }
 
 
-    const saved =
-      await callAppsScript(
-        request
-      );
-
-
-    /*
-     * 새로 저장한 사진의 Drive fileId까지 받기 위해
-     * 저장 직후 프로젝트를 다시 한 번 읽는다.
-     */
     const loaded =
       await callAppsScript({
 
@@ -2621,60 +4835,84 @@ async function saveProject(
           'loadProject',
 
         projectId:
-          saved.id
+          response.id
       });
 
 
-    state =
-      stateFromCloudProject(
-        loaded.project
-      );
+    if (
+      loaded?.project
+    ) {
+
+      const layoutEditing =
+        state.layoutEditing;
 
 
-    renderAll();
+      state =
+        normalizeLoadedState(
+          loaded.project
+        );
 
 
-    await saveLocalDraftNow();
+      state.layoutEditing =
+        layoutEditing;
+
+
+      applyStateToEditor();
+
+      renderAll();
+    }
+
+
+    isDirty =
+      false;
+
+
+    await saveLocalDraft();
 
 
     setSaveStatus(
+
       finalize
         ? '완성본 저장됨'
         : '클라우드 저장됨',
+
       'saved'
     );
-    
-    
-    if (finalize) {
-    
+
+
+    if (
+      finalize
+    ) {
+
       try {
-    
+
         await downloadCompleteFiles();
-    
-    
+
+
         showToast(
-          '원본과 완성본을 저장하고 PNG·PDF 파일을 만들었습니다.',
+          '완성본을 저장하고 PNG·PDF 파일을 만들었습니다.',
           'success'
         );
-    
-      } catch (downloadError) {
-    
-        console.warn(
-          '완성본 파일 다운로드 실패:',
+
+      } catch (
+        downloadError
+      ) {
+
+        console.error(
           downloadError
         );
-    
-    
+
+
         showToast(
-          'Drive 저장은 완료됐지만 PNG·PDF 파일 생성에 실패했습니다.',
+          'Drive 저장은 완료됐지만 PNG·PDF 다운로드에 실패했습니다.',
           'error'
         );
       }
-    
+
     } else {
-    
+
       showToast(
-        '편집 가능한 원본이 클라우드에 저장되었습니다.',
+        '작성 중인 내용을 클라우드에 저장했습니다.',
         'success'
       );
     }
@@ -2682,14 +4920,14 @@ async function saveProject(
   } catch (error) {
 
     setSaveStatus(
-      '저장 오류',
+      '저장 실패',
       'error'
     );
 
 
     showToast(
       error.message ||
-        '저장에 실패했습니다.',
+      '저장에 실패했습니다.',
       'error'
     );
 
@@ -2700,25 +4938,142 @@ async function saveProject(
 }
 
 
+function buildProjectPayload(finalize) {
 
-/* ============================================================
-   사진 저장 데이터 생성
-============================================================ */
+  return {
 
-function buildPhotoSavePayload() {
+    id:
+      state.id ||
+      null,
+
+    type:
+      state.type,
+
+    clubName:
+      state.clubName,
+
+    teacherName:
+      state.teacherName,
+
+    activities:
+      state.activities.map(
+        activity => ({
+
+          id:
+            activity.id,
+
+          title:
+            activity.title ||
+            '',
+
+          content:
+            activity.content ||
+            ''
+        })
+      ),
+
+    blocks:
+      state.blocks.map(
+        sanitizeBlockForSave
+      ),
+
+    status:
+      finalize
+        ? 'completed'
+        : 'draft'
+  };
+}
+
+
+function sanitizeBlockForSave(block) {
+
+  const output = {
+
+    id:
+      block.id,
+
+    type:
+      block.type,
+
+    x:
+      block.x,
+
+    y:
+      block.y,
+
+    w:
+      block.w,
+
+    h:
+      block.h,
+
+    z:
+      block.z ||
+      1,
+
+    locked:
+      Boolean(
+        block.locked
+      )
+  };
+
+
+  if (
+    block.activityId
+  ) {
+
+    output.activityId =
+      block.activityId;
+  }
+
+
+  if (
+    block.slotId
+  ) {
+
+    output.slotId =
+      block.slotId;
+  }
+
+
+  if (
+    block.text !==
+    undefined
+  ) {
+
+    output.text =
+      block.text;
+  }
+
+
+  if (
+    block.marker !==
+    undefined
+  ) {
+
+    output.marker =
+      block.marker;
+  }
+
+
+  return output;
+}
+
+
+function buildPhotosPayload() {
 
   return state.photos
-
     .filter(
       photo =>
-        photo.dataUrl ||
-        photo.fileId
+        Boolean(
+          photo.dataUrl ||
+          photo.fileId
+        )
     )
-
     .map(
       photo => {
 
-        const item = {
+        const payload = {
 
           slotId:
             photo.slotId,
@@ -2734,37 +5089,29 @@ function buildPhotoSavePayload() {
         };
 
 
-        /*
-         * 기존 Drive 사진을 변경하지 않았다면
-         * Base64를 다시 전송하지 않고 fileId만 보낸다.
-         */
         if (
-          photo.fileId &&
-          !photo.imageDirty
+          photo.fileId
         ) {
 
-          item.fileId =
+          payload.fileId =
             photo.fileId;
 
-        } else if (
-          photo.dataUrl
-        ) {
+        } else {
 
-          item.dataUrl =
+          payload.dataUrl =
             photo.dataUrl;
         }
 
 
-        return item;
+        return payload;
       }
     );
 }
 
 
-
-/* ============================================================
+/* =========================================================
    클라우드 불러오기
-============================================================ */
+========================================================= */
 
 async function openCloudDialog() {
 
@@ -2772,57 +5119,44 @@ async function openCloudDialog() {
     !isAppsScriptConfigured()
   ) {
 
-    showAppsScriptUrlError();
+    showToast(
+      'script.js 상단의 APPS_SCRIPT_URL을 먼저 설정해 주세요.',
+      'error'
+    );
 
     return;
   }
 
 
-  if (
-    !elements.cloudDialog.open
-  ) {
-
-    elements.cloudDialog
-      .showModal();
-  }
+  dom.cloudDialog.showModal();
 
 
-  elements.cloudProjectList.innerHTML =
+  dom.cloudProjectList.innerHTML =
     '<p class="empty-state">저장된 프로젝트를 불러오는 중입니다.</p>';
-
-
-  $$('.filter-chip')
-    .forEach(
-      item =>
-        item.classList.remove(
-          'is-active'
-        )
-    );
-
-
-  $('[data-project-filter="all"]')
-    .classList.add(
-      'is-active'
-    );
 
 
   try {
 
-    const data =
+    const response =
       await callAppsScript({
         action:
           'listProjects'
       });
 
 
-    renderCloudProjectList(
-      data.projects ||
-      []
-    );
+    cachedProjects =
+      Array.isArray(
+        response?.projects
+      )
+        ? response.projects
+        : [];
+
+
+    renderCloudProjectList();
 
   } catch (error) {
 
-    elements.cloudProjectList.innerHTML =
+    dom.cloudProjectList.innerHTML =
       '';
 
 
@@ -2841,30 +5175,26 @@ async function openCloudDialog() {
       '프로젝트 목록을 불러오지 못했습니다.';
 
 
-    elements.cloudProjectList
-      .append(
-        message
-      );
+    dom.cloudProjectList.appendChild(
+      message
+    );
   }
 }
 
 
+function renderCloudProjectList() {
 
-/* ============================================================
-   클라우드 프로젝트 목록
-============================================================ */
-
-function renderCloudProjectList(
-  projects
-) {
-
-  elements.cloudProjectList
-    .replaceChildren();
+  dom.cloudProjectList.innerHTML =
+    '';
 
 
-  elements.cloudProjectList.dataset.projects =
-    JSON.stringify(
-      projects
+  const projects =
+    cachedProjects.filter(
+      project =>
+        projectFilter ===
+        'all' ||
+        project.type ===
+        projectFilter
     );
 
 
@@ -2883,14 +5213,12 @@ function renderCloudProjectList(
 
 
     empty.textContent =
-      '클라우드에 저장된 프로젝트가 없습니다.';
+      '저장된 프로젝트가 없습니다.';
 
 
-    elements.cloudProjectList
-      .append(
-        empty
-      );
-
+    dom.cloudProjectList.appendChild(
+      empty
+    );
 
     return;
   }
@@ -2899,248 +5227,326 @@ function renderCloudProjectList(
   projects.forEach(
     project => {
 
-      const item =
-        document.createElement(
-          'article'
-        );
-
-
-      item.className =
-        'project-item';
-
-
-      item.dataset.projectType =
-        project.type;
-
-
-      item.dataset.projectId =
-        project.id;
-
-
-      /*
-       * 목록 단계에서는 미리보기 PNG 자체를
-       * 아직 서버가 반환하지 않으므로 간단한 표시만 보여준다.
-       */
-      const preview =
-        document.createElement(
-          'div'
-        );
-
-
-      preview.className =
-        'project-item__preview';
-
-
-      preview.style.display =
-        'grid';
-
-
-      preview.style.placeItems =
-        'center';
-
-
-      preview.style.color =
-        '#7e8790';
-
-
-      preview.style.fontSize =
-        '11px';
-
-
-      preview.textContent =
-        project.type === 'creative'
-          ? '창체'
-          : '자율';
-
-
-      const body =
-        document.createElement(
-          'div'
-        );
-
-
-      const name =
-        document.createElement(
-          'p'
-        );
-
-
-      name.className =
-        'project-item__name';
-
-
-      name.textContent =
-        project.clubName ||
-        '이름 없음';
-
-
-      const meta =
-        document.createElement(
-          'p'
-        );
-
-
-      meta.className =
-        'project-item__meta';
-
-
-      meta.textContent =
-        [
-          project.typeLabel ||
-            '',
-
-          project.title ||
-            '',
-
-          project.updatedAt
-            ? `수정 ${formatDate(project.updatedAt)}`
-            : ''
-        ]
-          .filter(Boolean)
-          .join(' · ');
-
-
-      body.append(
-        name,
-        meta
+      dom.cloudProjectList.appendChild(
+        createCloudProjectItem(
+          project
+        )
       );
-
-
-      const actions =
-        document.createElement(
-          'div'
-        );
-
-
-      actions.className =
-        'project-item__actions';
-
-
-      const loadButton =
-        makeSmallButton(
-          '불러오기'
-        );
-
-
-      loadButton
-        .addEventListener(
-          'click',
-          () =>
-            loadCloudProject(
-              project.id
-            )
-        );
-
-
-      const deleteButton =
-        makeSmallButton(
-          '삭제',
-          true
-        );
-
-
-      deleteButton
-        .addEventListener(
-          'click',
-          () =>
-            deleteCloudProject(
-              project.id,
-              project.clubName
-            )
-        );
-
-
-      actions.append(
-        loadButton,
-        deleteButton
-      );
-
-
-      item.append(
-        preview,
-        body,
-        actions
-      );
-
-
-      elements.cloudProjectList
-        .append(
-          item
-        );
     }
   );
 }
 
 
+function createCloudProjectItem(project) {
 
-function filterCloudProjects(
-  type
-) {
-
-  $$('.project-item')
-    .forEach(
-      item => {
-
-        item.hidden =
-          type !== 'all' &&
-          item.dataset.projectType !==
-            type;
-      }
+  const item =
+    document.createElement(
+      'article'
     );
+
+
+  item.className =
+    'project-item';
+
+
+  const preview =
+    document.createElement(
+      'div'
+    );
+
+
+  preview.className =
+    'project-item__preview';
+
+
+  preview.style.background =
+    project.type ===
+    'creative'
+      ? '#efe5f5'
+      : '#dfeef8';
+
+
+  preview.style.display =
+    'grid';
+
+
+  preview.style.placeItems =
+    'center';
+
+
+  preview.style.fontSize =
+    '9px';
+
+
+  preview.style.fontWeight =
+    '800';
+
+
+  preview.textContent =
+    project.typeLabel ||
+    (
+      project.type ===
+      'creative'
+        ? '창체'
+        : '자율'
+    );
+
+
+  const info =
+    document.createElement(
+      'div'
+    );
+
+
+  const name =
+    document.createElement(
+      'h3'
+    );
+
+
+  name.className =
+    'project-item__name';
+
+
+  name.textContent =
+    project.clubName ||
+    '이름 없는 동아리';
+
+
+  const meta =
+    document.createElement(
+      'p'
+    );
+
+
+  meta.className =
+    'project-item__meta';
+
+
+  const parts =
+    [];
+
+
+  if (
+    project.typeLabel
+  ) {
+
+    parts.push(
+      project.typeLabel
+    );
+  }
+
+
+  if (
+    project.teacherName
+  ) {
+
+    parts.push(
+      `담당 ${project.teacherName}`
+    );
+  }
+
+
+  if (
+    project.activityCount
+  ) {
+
+    parts.push(
+      `활동 ${project.activityCount}개`
+    );
+  }
+
+
+  if (
+    project.updatedAt
+  ) {
+
+    parts.push(
+      formatDateTime(
+        project.updatedAt
+      )
+    );
+  }
+
+
+  meta.textContent =
+    parts.join(
+      ' · '
+    );
+
+
+  info.append(
+    name,
+    meta
+  );
+
+
+  const actions =
+    document.createElement(
+      'div'
+    );
+
+
+  actions.className =
+    'project-item__actions';
+
+
+  const loadButton =
+    document.createElement(
+      'button'
+    );
+
+
+  loadButton.type =
+    'button';
+
+
+  loadButton.className =
+    'mini-btn';
+
+
+  loadButton.textContent =
+    '불러오기';
+
+
+  loadButton.addEventListener(
+    'click',
+    () => {
+
+      loadCloudProject(
+        project.id
+      );
+    }
+  );
+
+
+  const deleteButton =
+    document.createElement(
+      'button'
+    );
+
+
+  deleteButton.type =
+    'button';
+
+
+  deleteButton.className =
+    'mini-btn mini-btn--danger';
+
+
+  deleteButton.textContent =
+    '삭제';
+
+
+  deleteButton.addEventListener(
+    'click',
+    () => {
+
+      deleteCloudProject(
+        project
+      );
+    }
+  );
+
+
+  actions.append(
+    loadButton,
+    deleteButton
+  );
+
+
+  item.append(
+    preview,
+    info,
+    actions
+  );
+
+
+  return item;
 }
 
 
+async function loadCloudProject(projectId) {
 
-/* ============================================================
-   클라우드 프로젝트 불러오기
-============================================================ */
+  if (
+    isDirty
+  ) {
 
-async function loadCloudProject(
-  projectId
-) {
+    const confirmed =
+      await confirmAction(
+
+        '저장된 작업 불러오기',
+
+        '현재 수정 중인 내용이 있습니다. 저장하지 않고 다른 작업을 불러올까요?'
+      );
+
+
+    if (
+      !confirmed
+    ) {
+      return;
+    }
+  }
+
 
   showLoading(
-    '프로젝트를 불러오고 있습니다.'
+    '저장된 작업을 불러오는 중입니다.'
   );
 
 
   try {
 
-    const data =
+    const response =
       await callAppsScript({
 
         action:
           'loadProject',
 
-        projectId:
-          projectId
+        projectId
       });
 
 
+    if (
+      !response?.project
+    ) {
+
+      throw new Error(
+        '프로젝트 데이터를 찾을 수 없습니다.'
+      );
+    }
+
+
     state =
-      stateFromCloudProject(
-        data.project
+      normalizeLoadedState(
+        response.project
       );
 
 
+    isDirty =
+      false;
+
+
+    applyStateToEditor();
+
     renderAll();
 
+    fitPreviewToWindow();
 
-    await saveLocalDraftNow();
+
+    await saveLocalDraft();
 
 
-    elements.cloudDialog
-      .close();
+    dom.cloudDialog.close();
 
 
     setSaveStatus(
-      '클라우드에서 불러옴',
+      '클라우드 불러옴',
       'saved'
     );
 
 
     showToast(
-      '저장된 프로젝트를 불러왔습니다.',
+      '저장된 작업을 불러왔습니다.',
       'success'
     );
 
@@ -3148,7 +5554,7 @@ async function loadCloudProject(
 
     showToast(
       error.message ||
-        '프로젝트를 불러오지 못했습니다.',
+      '프로젝트를 불러오지 못했습니다.',
       'error'
     );
 
@@ -3159,28 +5565,19 @@ async function loadCloudProject(
 }
 
 
+/* =========================================================
+   클라우드 삭제
+========================================================= */
 
-/* ============================================================
-   클라우드 프로젝트 삭제
-============================================================ */
-
-async function deleteCloudProject(
-  projectId,
-  clubName
-) {
+async function deleteCloudProject(project) {
 
   const confirmed =
-    await askConfirm({
+    await confirmAction(
 
-      title:
-        '클라우드 프로젝트 삭제',
+      '프로젝트 삭제',
 
-      message:
-        `"${clubName || '이 프로젝트'}"의 편집 가능한 원본을 휴지통으로 이동할까요?`,
-
-      confirmText:
-        '삭제'
-    });
+      `"${project.clubName || '이름 없는 동아리'}" 프로젝트를 삭제할까요? Drive의 편집 원본과 완성본도 휴지통으로 이동합니다.`
+    );
 
 
   if (
@@ -3191,7 +5588,7 @@ async function deleteCloudProject(
 
 
   showLoading(
-    '프로젝트를 삭제하고 있습니다.'
+    '프로젝트를 삭제하는 중입니다.'
   );
 
 
@@ -3203,39 +5600,45 @@ async function deleteCloudProject(
         'deleteProject',
 
       projectId:
-        projectId
+        project.id
     });
 
 
-    /*
-     * 현재 편집 중인 프로젝트를 삭제했다면
-     * 화면도 새 작업으로 돌린다.
-     */
+    cachedProjects =
+      cachedProjects.filter(
+        item =>
+          item.id !==
+          project.id
+      );
+
+
     if (
-      state.id === projectId
+      state.id ===
+      project.id
     ) {
 
       state =
         createEmptyState();
 
 
+      isDirty =
+        false;
+
+
+      applyStateToEditor();
+
       renderAll();
 
 
-      await saveLocalDraftNow();
-
-
-      setSaveStatus(
-        '새 작업'
-      );
+      await saveLocalDraft();
     }
 
 
-    await openCloudDialog();
+    renderCloudProjectList();
 
 
     showToast(
-      '프로젝트를 휴지통으로 이동했습니다.',
+      '프로젝트를 삭제했습니다.',
       'success'
     );
 
@@ -3243,7 +5646,7 @@ async function deleteCloudProject(
 
     showToast(
       error.message ||
-        '프로젝트를 삭제하지 못했습니다.',
+      '프로젝트 삭제에 실패했습니다.',
       'error'
     );
 
@@ -3254,313 +5657,376 @@ async function deleteCloudProject(
 }
 
 
+/* =========================================================
+   새 작업
+========================================================= */
 
-/* ============================================================
-   Drive 프로젝트 → 프런트 상태
-============================================================ */
-
-function stateFromCloudProject(
-  project
-) {
-
-  const normalized =
-    normalizeState({
-
-      ...project,
-
-      teacherName:
-        project.teacherName ||
-        '',
-
-      photoLayout:
-        project.photoLayout ||
-        2
-    });
-
-
-  normalized.photos =
-    normalizePhotos(
-
-      (
-        project.photos ||
-        []
-      )
-        .map(
-          (photo, index) => ({
-
-            ...EMPTY_PHOTO(
-              index
-            ),
-
-            ...photo,
-
-            crop:
-              normalizeCrop(
-                photo.crop
-              ),
-
-            imageDirty:
-              false
-          })
-        )
-    );
-
-
-  return normalized;
-}
-
-
-
-/* ============================================================
-   Apps Script 요청
-============================================================ */
-
-async function callAppsScript(
-  payload
-) {
-
-  const response =
-    await fetch(
-      APPS_SCRIPT_URL,
-      {
-        method:
-          'POST',
-
-        headers: {
-          'Content-Type':
-            'text/plain;charset=utf-8'
-        },
-
-        body:
-          JSON.stringify(
-            payload
-          ),
-
-        redirect:
-          'follow'
-      }
-    );
-
+async function handleNewProject() {
 
   if (
-    !response.ok
+    isDirty
   ) {
 
-    throw new Error(
-      `서버 요청에 실패했습니다. (${response.status})`
-    );
+    const confirmed =
+      await confirmAction(
+
+        '새로 만들기',
+
+        '현재 수정 중인 내용이 있습니다. 저장하지 않고 새 작업을 시작할까요?'
+      );
+
+
+    if (
+      !confirmed
+    ) {
+      return;
+    }
   }
 
 
-  const result =
-    await response.json();
+  state =
+    createEmptyState();
 
 
-  if (
-    !result ||
-    result.ok !== true
-  ) {
-
-    throw new Error(
-      result?.error ||
-      'Apps Script 처리 중 오류가 발생했습니다.'
-    );
-  }
+  isDirty =
+    false;
 
 
-  return result.data;
-}
+  applyStateToEditor();
+
+  renderAll();
+
+  fitPreviewToWindow();
 
 
+  await clearLocalDraft();
 
-/* ============================================================
-   Apps Script URL 확인
-============================================================ */
 
-function isAppsScriptConfigured() {
-
-  return (
-    typeof APPS_SCRIPT_URL ===
-      'string' &&
-
-    /^https:\/\/script\.google\.com\/macros\/s\/.+\/exec(?:\?.*)?$/
-      .test(
-        APPS_SCRIPT_URL.trim()
-      )
+  setSaveStatus(
+    '새 작업',
+    ''
   );
-}
 
-
-
-function showAppsScriptUrlError() {
 
   showToast(
-    'script.js 상단의 APPS_SCRIPT_URL에 배포된 Apps Script 웹 앱 주소를 입력해 주세요.',
-    'error'
+    '새 작업을 시작했습니다.',
+    'success'
   );
 }
 
 
+/* =========================================================
+   내용 초기화
+========================================================= */
+
+async function resetContentOnly() {
+
+  const confirmed =
+    await confirmAction(
+
+      '내용 초기화',
+
+      '동아리명, 담당교사, 활동 제목과 내용, 사진을 모두 비울까요? 레이아웃은 유지됩니다.'
+    );
+
+
+  if (
+    !confirmed
+  ) {
+    return;
+  }
+
+
+  state.clubName =
+    '';
+
+
+  state.teacherName =
+    '';
+
+
+  state.activities =
+    createDefaultActivities();
+
+
+  state.photos =
+    [];
+
+
+  state.aiUndoSnapshot =
+    null;
+
+
+  applyStateToEditor();
+
+  markDirty();
+
+  renderAll();
+
+
+  showToast(
+    '입력 내용을 초기화했습니다.',
+    'success'
+  );
+}
+
+
+/* =========================================================
+   미리보기 확대/축소
+========================================================= */
+
+function fitPreviewToWindow() {
+
+  if (
+    !dom.previewStage ||
+    !dom.poster
+  ) {
+    return;
+  }
+
+
+  const stageRect =
+    dom.previewStage
+      .getBoundingClientRect();
+
+
+  const pageWidth =
+    dom.poster.offsetWidth;
+
+
+  const pageHeight =
+    dom.poster.offsetHeight;
+
+
+  if (
+    !pageWidth ||
+    !pageHeight
+  ) {
+    return;
+  }
+
+
+  const availableWidth =
+    Math.max(
+      200,
+      stageRect.width -
+      44
+    );
+
+
+  const availableHeight =
+    Math.max(
+      300,
+      stageRect.height -
+      50
+    );
+
+
+  const fitted =
+    Math.min(
+
+      availableWidth /
+      pageWidth,
+
+      availableHeight /
+      pageHeight
+    );
+
+
+  setPreviewZoom(
+
+    clamp(
+
+      Math.floor(
+        fitted *
+        20
+      ) /
+      20,
+
+      APP_CONFIG
+        .MIN_PREVIEW_ZOOM,
+
+      0.8
+    )
+  );
+}
+
+
+function setPreviewZoom(value) {
+
+  previewZoom =
+    clamp(
+
+      value,
+
+      APP_CONFIG
+        .MIN_PREVIEW_ZOOM,
+
+      APP_CONFIG
+        .MAX_PREVIEW_ZOOM
+    );
+
+
+  dom.poster.style.transform =
+    `scale(${previewZoom})`;
+
+
+  dom.posterWrapper.style.width =
+    `${dom.poster.offsetWidth * previewZoom}px`;
+
+
+  dom.posterWrapper.style.height =
+    `${dom.poster.offsetHeight * previewZoom}px`;
+
+
+  dom.zoomLabel.textContent =
+    `${Math.round(previewZoom * 100)}%`;
+}
+
+
+/* =========================================================
+   포스터 캡처
+========================================================= */
+
+async function capturePosterDataUrl(pixelRatio) {
+
+  await loadExportLibraries(
+    false
+  );
+
+
+  if (
+    !window.htmlToImage?.toPng
+  ) {
+
+    throw new Error(
+      '이미지 저장 라이브러리를 불러오지 못했습니다.'
+    );
+  }
+
+
+  const previousEditing =
+    state.layoutEditing;
+
+
+  const previousSelected =
+    state.selectedBlockId;
+
+
+  dom.poster.classList.add(
+    'is-exporting'
+  );
+
+
+  dom.poster.dataset.layoutEditing =
+    'false';
+
+
+  state.selectedBlockId =
+    null;
+
+
+  renderBlocks();
+
+
+  try {
+
+    await waitForImages(
+      dom.poster
+    );
+
+
+    return await window
+      .htmlToImage
+      .toPng(
+
+        dom.poster,
+
+        {
+
+          pixelRatio,
+
+          cacheBust:
+            true,
+
+          backgroundColor:
+            null,
+
+          width:
+            dom.poster.offsetWidth,
+
+          height:
+            dom.poster.offsetHeight,
+
+          style: {
+
+            transform:
+              'none',
+
+            transformOrigin:
+              'top left'
+          }
+        }
+      );
+
+  } finally {
+
+    dom.poster.classList.remove(
+      'is-exporting'
+    );
+
+
+    dom.poster.dataset.layoutEditing =
+      String(
+        previousEditing
+      );
+
+
+    state.selectedBlockId =
+      previousSelected;
+
+
+    renderBlocks();
+  }
+}
+
+
+/* =========================================================
+   완성본 PNG / PDF
+========================================================= */
 
 async function downloadCompleteFiles() {
 
-  await loadExportLibraries();
-
-
-  const baseName =
-    safeFileName(
-      state.clubName ||
-      '동아리_전시자료'
-    );
-
-
-  /*
-   * 한 번만 고해상도로 렌더링하고
-   * PNG와 PDF 모두 같은 이미지를 사용한다.
-   */
-  const dataUrl =
-    await capturePosterDataUrl(
-      APP_CONFIG.EXPORT_PIXEL_RATIO
-    );
-
-
-  /* =====================
-     PNG 다운로드
-  ===================== */
-
-  downloadDataUrl(
-    dataUrl,
-    `${baseName}.png`
-  );
-
-
-  /* =====================
-     PDF 다운로드
-  ===================== */
-
-  const jsPDF =
-    window.jspdf?.jsPDF;
-
-
-  if (!jsPDF) {
-
-    throw new Error(
-      'PDF 라이브러리를 불러오지 못했습니다.'
-    );
-  }
-
-
-  const pdf =
-    new jsPDF({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'a4',
-      compress: true
-    });
-
-
-  pdf.addImage(
-    dataUrl,
-    'PNG',
-    0,
-    0,
-    210,
-    297,
-    undefined,
-    'FAST'
-  );
-
-
-  pdf.save(
-    `${baseName}.pdf`
-  );
-}
-
-
-
-/* ============================================================
-   PNG 저장
-============================================================ */
-
-async function exportPng() {
-
-  const fileName =
-    `${safeFileName(
-      state.clubName ||
-      '동아리_전시자료'
-    )}.png`;
-
-
   showLoading(
-    '고해상도 PNG를 만들고 있습니다.'
+    'PNG와 PDF 파일을 만드는 중입니다.'
   );
 
 
   try {
 
-    await loadExportLibraries();
+    await loadExportLibraries(
+      true
+    );
 
 
     const dataUrl =
       await capturePosterDataUrl(
-        APP_CONFIG.EXPORT_PIXEL_RATIO
+        APP_CONFIG
+          .DOWNLOAD_PIXEL_RATIO
+      );
+
+
+    const baseName =
+      safeDownloadFileName(
+        state.clubName ||
+        '동아리_전시자료'
       );
 
 
     downloadDataUrl(
       dataUrl,
-      fileName
+      `${baseName}.png`
     );
-
-
-    showToast(
-      'PNG 파일을 저장했습니다.',
-      'success'
-    );
-
-  } catch (error) {
-
-    showToast(
-      error.message ||
-        'PNG 생성에 실패했습니다.',
-      'error'
-    );
-
-  } finally {
-
-    hideLoading();
-  }
-}
-
-
-
-/* ============================================================
-   PDF 저장
-============================================================ */
-
-async function exportPdf() {
-
-  const fileName =
-    `${safeFileName(
-      state.clubName ||
-      '동아리_전시자료'
-    )}.pdf`;
-
-
-  showLoading(
-    'PDF를 만들고 있습니다.'
-  );
-
-
-  try {
-
-    await loadExportLibraries();
-
-
-    const dataUrl =
-      await capturePosterDataUrl(
-        2.5
-      );
 
 
     const jsPDF =
@@ -3572,7 +6038,7 @@ async function exportPdf() {
     ) {
 
       throw new Error(
-        'PDF 라이브러리를 불러오지 못했습니다.'
+        'PDF 저장 라이브러리를 불러오지 못했습니다.'
       );
     }
 
@@ -3595,33 +6061,25 @@ async function exportPdf() {
 
 
     pdf.addImage(
+
       dataUrl,
+
       'PNG',
+
       0,
       0,
+
       210,
       297,
+
       undefined,
+
       'FAST'
     );
 
 
     pdf.save(
-      fileName
-    );
-
-
-    showToast(
-      'PDF 파일을 저장했습니다.',
-      'success'
-    );
-
-  } catch (error) {
-
-    showToast(
-      error.message ||
-        'PDF 생성에 실패했습니다.',
-      'error'
+      `${baseName}.pdf`
     );
 
   } finally {
@@ -3631,227 +6089,78 @@ async function exportPdf() {
 }
 
 
-
-/* ============================================================
-   출력물을 PNG Data URL로 변환
-============================================================ */
-
-async function capturePosterDataUrl(
-  pixelRatio
+function downloadDataUrl(
+  dataUrl,
+  fileName
 ) {
 
-  await loadExportLibraries();
+  const link =
+    document.createElement(
+      'a'
+    );
+
+
+  link.href =
+    dataUrl;
+
+
+  link.download =
+    fileName;
+
+
+  document.body.appendChild(
+    link
+  );
+
+
+  link.click();
+
+  link.remove();
+}
+
+
+/* =========================================================
+   외부 저장 라이브러리
+========================================================= */
+
+async function loadExportLibraries(
+  includePdf
+) {
+
+  if (
+    !window.htmlToImage
+  ) {
+
+    await loadScriptOnce(
+
+      APP_CONFIG
+        .HTML_TO_IMAGE_URL,
+
+      'html-to-image'
+    );
+  }
 
 
   if (
-    !window.htmlToImage?.toPng
+    includePdf &&
+    !window.jspdf?.jsPDF
   ) {
 
-    throw new Error(
-      '이미지 저장 기능을 불러오지 못했습니다.'
+    await loadScriptOnce(
+
+      APP_CONFIG
+        .JSPDF_URL,
+
+      'jspdf'
     );
-  }
-
-
-  const poster =
-    elements.poster;
-
-
-  const oldZoom =
-    poster.style.zoom;
-
-
-  /*
-   * 빈 contenteditable 영역에서 보이는
-   * placeholder 안내 문구는 최종 이미지에 나오지 않도록 한다.
-   */
-  const placeholders =
-    $$(
-      '#poster-canvas [contenteditable="true"][data-placeholder]'
-    )
-      .map(
-        element => ({
-
-          element:
-            element,
-
-          placeholder:
-            element.getAttribute(
-              'data-placeholder'
-            )
-        })
-      );
-
-
-  /*
-   * 사진이 비어 있을 때 보이는
-   * + 사진 추가 문구도 결과물에서는 제거한다.
-   */
-  const photoPlaceholders =
-    $$(
-      '#poster-canvas .photo-placeholder'
-    )
-      .map(
-        element => ({
-
-          element:
-            element,
-
-          display:
-            element.style.display
-        })
-      );
-
-
-  poster.classList.add(
-    'is-exporting'
-  );
-
-
-  poster.style.zoom =
-    '1';
-
-
-  placeholders
-    .forEach(
-      item => {
-
-        item.element
-          .setAttribute(
-            'data-placeholder',
-            ''
-          );
-      }
-    );
-
-
-  photoPlaceholders
-    .forEach(
-      item => {
-
-        if (
-          !item.element.hidden
-        ) {
-
-          item.element.style.display =
-            'none';
-        }
-      }
-    );
-
-
-  try {
-
-    await waitForImages(
-      poster
-    );
-
-
-    return await window.htmlToImage
-      .toPng(
-        poster,
-        {
-
-          pixelRatio:
-            pixelRatio,
-
-          cacheBust:
-            true,
-
-          backgroundColor:
-            '#ffffff',
-
-          width:
-            poster.offsetWidth,
-
-          height:
-            poster.offsetHeight,
-
-          style: {
-            transform:
-              'none',
-
-            margin:
-              '0'
-          }
-        }
-      );
-
-  } finally {
-
-    poster.classList.remove(
-      'is-exporting'
-    );
-
-
-    poster.style.zoom =
-      oldZoom;
-
-
-    placeholders
-      .forEach(
-        item => {
-
-          item.element
-            .setAttribute(
-              'data-placeholder',
-              item.placeholder ||
-              ''
-            );
-        }
-      );
-
-
-    photoPlaceholders
-      .forEach(
-        item => {
-
-          item.element.style.display =
-            item.display;
-        }
-      );
   }
 }
 
 
-
-/* ============================================================
-   PNG/PDF 외부 라이브러리
-============================================================ */
-
-async function loadExportLibraries() {
-
-  await loadExternalScript(
-    APP_CONFIG.HTML_TO_IMAGE_URL,
-    () =>
-      Boolean(
-        window.htmlToImage?.toPng
-      )
-  );
-
-
-  await loadExternalScript(
-    APP_CONFIG.JSPDF_URL,
-    () =>
-      Boolean(
-        window.jspdf?.jsPDF
-      )
-  );
-}
-
-
-
-function loadExternalScript(
+function loadScriptOnce(
   src,
-  readyTest
+  key
 ) {
-
-  if (
-    readyTest()
-  ) {
-    return Promise.resolve();
-  }
-
 
   return new Promise(
     (
@@ -3861,7 +6170,7 @@ function loadExternalScript(
 
       const existing =
         document.querySelector(
-          `script[data-external-src="${src}"]`
+          `script[data-dynamic-lib="${key}"]`
         );
 
 
@@ -3869,9 +6178,20 @@ function loadExternalScript(
         existing
       ) {
 
+        if (
+          existing.dataset.loaded ===
+          'true'
+        ) {
+
+          resolve();
+
+          return;
+        }
+
+
         existing.addEventListener(
           'load',
-          () => resolve(),
+          resolve,
           {
             once: true
           }
@@ -3880,12 +6200,16 @@ function loadExternalScript(
 
         existing.addEventListener(
           'error',
-          () =>
+
+          () => {
+
             reject(
               new Error(
                 '외부 라이브러리를 불러오지 못했습니다.'
               )
-            ),
+            );
+          },
+
           {
             once: true
           }
@@ -3910,50 +6234,37 @@ function loadExternalScript(
         true;
 
 
-      script.dataset.externalSrc =
-        src;
+      script.dataset.dynamicLib =
+        key;
 
 
       script.addEventListener(
         'load',
         () => {
 
-          if (
-            readyTest()
-          ) {
+          script.dataset.loaded =
+            'true';
 
-            resolve();
 
-          } else {
-
-            reject(
-              new Error(
-                '외부 라이브러리가 정상적으로 초기화되지 않았습니다.'
-              )
-            );
-          }
-        },
-        {
-          once: true
+          resolve();
         }
       );
 
 
       script.addEventListener(
         'error',
-        () =>
+        () => {
+
           reject(
             new Error(
               '외부 라이브러리를 불러오지 못했습니다.'
             )
-          ),
-        {
-          once: true
+          );
         }
       );
 
 
-      document.head.append(
+      document.head.appendChild(
         script
       );
     }
@@ -3961,361 +6272,654 @@ function loadExternalScript(
 }
 
 
+function waitForImages(root) {
 
-/* ============================================================
-   새로 만들기
-============================================================ */
-
-async function handleNewProject() {
-
-  if (
-    hasMeaningfulContent(
-      state
+  const images =
+    Array.from(
+      root.querySelectorAll(
+        'img'
+      )
     )
-  ) {
+      .filter(
+        image =>
+          !image.hidden &&
+          image.src
+      );
 
-    const confirmed =
-      await askConfirm({
 
-        title:
-          '새로 만들기',
+  return Promise.all(
 
-        message:
-          '현재 화면의 내용을 비우고 새 전시자료를 만들까요? 클라우드에 저장하지 않은 변경 내용은 사라집니다.',
+    images.map(
+      image => {
 
-        confirmText:
-          '새로 만들기'
-      });
+        if (
+          image.complete
+        ) {
 
-
-    if (
-      !confirmed
-    ) {
-      return;
-    }
-  }
-
-
-  state =
-    createEmptyState();
-
-
-  renderAll();
-
-
-  await saveLocalDraftNow();
-
-
-  setSaveStatus(
-    '새 작업'
-  );
-
-
-  showToast(
-    '새 전시자료를 시작합니다.'
-  );
-}
-
-
-
-/* ============================================================
-   전체 초기화
-============================================================ */
-
-async function handleReset() {
-
-  const confirmed =
-    await askConfirm({
-
-      title:
-        '전체 초기화',
-
-      message:
-        '현재 입력한 글과 사진을 모두 초기화할까요? 클라우드에 저장된 파일은 삭제되지 않습니다.',
-
-      confirmText:
-        '초기화'
-    });
-
-
-  if (
-    !confirmed
-  ) {
-    return;
-  }
-
-
-  state =
-    createEmptyState();
-
-
-  renderAll();
-
-
-  await saveLocalDraftNow();
-
-
-  setSaveStatus(
-    '초기화됨'
-  );
-
-
-  showToast(
-    '현재 화면을 초기화했습니다.'
-  );
-}
-
-
-
-/* ============================================================
-   예시 불러오기
-============================================================ */
-
-async function loadExample() {
-
-  if (
-    hasMeaningfulContent(
-      state
-    )
-  ) {
-
-    const confirmed =
-      await askConfirm({
-
-        title:
-          '예시 불러오기',
-
-        message:
-          '현재 화면 내용을 예시 자료로 바꿀까요? 클라우드에 저장하지 않은 변경 내용은 사라집니다.',
-
-        confirmText:
-          '불러오기'
-      });
-
-
-    if (
-      !confirmed
-    ) {
-      return;
-    }
-  }
-
-
-  state =
-    createEmptyState();
-
-
-  state.clubName =
-    '코딩동아리';
-
-
-  state.teacherName =
-    '홍길동';
-
-
-  state.title =
-    '마이크로비트로 만드는 생활 속 스마트 장치';
-
-
-  state.activityText =
-    '마이크로비트의 기본 기능과 다양한 센서의 역할을 알아보고 간단한 실습을 진행하였다. 이후 생활 속에서 불편한 점을 찾아 센서를 활용한 스마트 장치를 구상하고, 의사코드를 작성하여 동작 과정을 정리하였다. 직접 프로그램을 제작하고 실행 결과를 확인하면서 오류를 수정하였으며, 완성한 작품의 기능과 제작 과정을 서로 소개하였다.';
-
-
-  state.photoLayout =
-    2;
-
-
-  renderAll();
-
-
-  markChanged();
-
-
-  showToast(
-    '예시 내용을 불러왔습니다.'
-  );
-}
-
-
-
-/* ============================================================
-   브라우저 자동저장
-============================================================ */
-
-function markChanged() {
-
-  setSaveStatus(
-    '변경사항 있음'
-  );
-
-
-  if (
-    !uiInitialized
-  ) {
-    return;
-  }
-
-
-  clearTimeout(
-    localSaveTimer
-  );
-
-
-  localSaveTimer =
-    setTimeout(
-      async () => {
-
-        try {
-
-          await saveLocalDraftNow();
-
-
-          setSaveStatus(
-            '브라우저 자동저장됨'
-          );
-
-        } catch (error) {
-
-          console.warn(
-            '자동저장 실패:',
-            error
-          );
-
-
-          setSaveStatus(
-            '자동저장 오류',
-            'error'
-          );
+          return Promise.resolve();
         }
-      },
-      APP_CONFIG.LOCAL_SAVE_DELAY
-    );
-}
 
 
+        return new Promise(
+          resolve => {
 
-/* ============================================================
-   IndexedDB 저장
-============================================================ */
+            image.addEventListener(
+              'load',
+              resolve,
+              {
+                once: true
+              }
+            );
 
-async function saveLocalDraftNow() {
 
-  const db =
-    await openLocalDb();
-
-
-  await new Promise(
-    (
-      resolve,
-      reject
-    ) => {
-
-      const transaction =
-        db.transaction(
-          APP_CONFIG.LOCAL_DB_STORE,
-          'readwrite'
+            image.addEventListener(
+              'error',
+              resolve,
+              {
+                once: true
+              }
+            );
+          }
         );
-
-
-      const store =
-        transaction.objectStore(
-          APP_CONFIG.LOCAL_DB_STORE
-        );
-
-
-      const request =
-        store.put(
-          JSON.parse(
-            JSON.stringify(
-              state
-            )
-          ),
-          APP_CONFIG.LOCAL_DB_KEY
-        );
-
-
-      request.onsuccess =
-        () => resolve();
-
-
-      request.onerror =
-        () =>
-          reject(
-            request.error
-          );
-    }
+      }
+    )
   );
-
-
-  db.close();
 }
 
 
+/* =========================================================
+   Apps Script 통신
+========================================================= */
 
-/* ============================================================
-   IndexedDB 불러오기
-============================================================ */
+async function callAppsScript(payload) {
 
-async function loadLocalDraft() {
+  if (
+    !isAppsScriptConfigured()
+  ) {
 
-  const db =
-    await openLocalDb();
+    throw new Error(
+      'script.js 상단의 APPS_SCRIPT_URL에 배포된 Apps Script 웹 앱 주소를 입력해 주세요.'
+    );
+  }
+
+
+  let response;
 
 
   try {
 
-    return await new Promise(
+    response =
+      await fetch(
+
+        APPS_SCRIPT_URL,
+
+        {
+
+          method:
+            'POST',
+
+          headers: {
+
+            'Content-Type':
+              'text/plain;charset=utf-8'
+          },
+
+          body:
+            JSON.stringify(
+              payload
+            ),
+
+          redirect:
+            'follow'
+        }
+      );
+
+  } catch (error) {
+
+    throw new Error(
+      'Apps Script 서버에 연결하지 못했습니다. 인터넷 연결과 웹 앱 배포 주소를 확인해 주세요.'
+    );
+  }
+
+
+  let json;
+
+
+  try {
+
+    json =
+      await response.json();
+
+  } catch (error) {
+
+    throw new Error(
+      '서버 응답을 읽지 못했습니다. Apps Script 배포 설정을 확인해 주세요.'
+    );
+  }
+
+
+  if (
+    !json.ok
+  ) {
+
+    throw new Error(
+      json.error ||
+      '서버에서 오류가 발생했습니다.'
+    );
+  }
+
+
+  return json.data;
+}
+
+
+function isAppsScriptConfigured() {
+
+  return Boolean(
+
+    APPS_SCRIPT_URL &&
+
+    /^https:\/\/script\.google\.com\//i
+      .test(
+        APPS_SCRIPT_URL
+      )
+  );
+}
+
+
+/* =========================================================
+   불러온 프로젝트 정규화
+========================================================= */
+
+function normalizeLoadedState(project) {
+
+  const next =
+    createEmptyState();
+
+
+  next.id =
+    project.id ||
+    null;
+
+
+  next.type =
+    project.type ===
+    'creative'
+      ? 'creative'
+      : 'autonomous';
+
+
+  next.clubName =
+    String(
+      project.clubName ||
+      ''
+    );
+
+
+  next.teacherName =
+    String(
+      project.teacherName ||
+      ''
+    );
+
+
+  next.activities =
+    normalizeActivities(
+      project.activities
+    );
+
+
+  next.blocks =
+    normalizeBlocks(
+      project.blocks
+    );
+
+
+  next.photos =
+    normalizePhotos(
+      project.photos
+    );
+
+
+  next.status =
+    project.status ||
+    'draft';
+
+
+  next.createdAt =
+    project.createdAt ||
+    null;
+
+
+  next.updatedAt =
+    project.updatedAt ||
+    null;
+
+
+  next.layoutEditing =
+    false;
+
+
+  next.selectedBlockId =
+    null;
+
+
+  next.aiUndoSnapshot =
+    null;
+
+
+  return next;
+}
+
+
+function normalizeActivities(activities) {
+
+  const input =
+    Array.isArray(
+      activities
+    )
+      ? activities
+      : [];
+
+
+  const output =
+    createDefaultActivities();
+
+
+  input
+    .slice(
+      0,
+      2
+    )
+    .forEach(
       (
-        resolve,
-        reject
+        activity,
+        index
       ) => {
 
-        const transaction =
-          db.transaction(
-            APP_CONFIG.LOCAL_DB_STORE,
-            'readonly'
-          );
+        output[index] = {
 
+          id:
+            `activity_${index + 1}`,
 
-        const store =
-          transaction.objectStore(
-            APP_CONFIG.LOCAL_DB_STORE
-          );
+          title:
+            String(
+              activity?.title ||
+              ''
+            ),
 
-
-        const request =
-          store.get(
-            APP_CONFIG.LOCAL_DB_KEY
-          );
-
-
-        request.onsuccess =
-          () =>
-            resolve(
-              request.result ||
-              null
-            );
-
-
-        request.onerror =
-          () =>
-            reject(
-              request.error
-            );
+          content:
+            String(
+              activity?.content ||
+              ''
+            )
+        };
       }
     );
 
-  } finally {
 
-    db.close();
+  return output;
+}
+
+
+function normalizeBlocks(blocks) {
+
+  if (
+    !Array.isArray(
+      blocks
+    ) ||
+    !blocks.length
+  ) {
+
+    return createDefaultBlocks();
+  }
+
+
+  const normalized =
+    blocks
+      .map(
+        block => {
+
+          if (
+            !block?.id ||
+            !block?.type
+          ) {
+
+            return null;
+          }
+
+
+          const output =
+            cloneJson(
+              block
+            );
+
+
+          output.id =
+            String(
+              output.id
+            );
+
+
+          output.type =
+            String(
+              output.type
+            );
+
+
+          output.x =
+            clamp(
+              Number(
+                output.x ||
+                1
+              ),
+              1,
+              APP_CONFIG.GRID_COLUMNS
+            );
+
+
+          output.y =
+            clamp(
+              Number(
+                output.y ||
+                1
+              ),
+              1,
+              APP_CONFIG.GRID_ROWS
+            );
+
+
+          output.w =
+            clamp(
+              Number(
+                output.w ||
+                4
+              ),
+              2,
+              APP_CONFIG.GRID_COLUMNS
+            );
+
+
+          output.h =
+            clamp(
+              Number(
+                output.h ||
+                4
+              ),
+              2,
+              18
+            );
+
+
+          output.w =
+            Math.min(
+
+              output.w,
+
+              APP_CONFIG.GRID_COLUMNS -
+              output.x +
+              1
+            );
+
+
+          output.h =
+            Math.min(
+
+              output.h,
+
+              APP_CONFIG.GRID_ROWS -
+              output.y +
+              1
+            );
+
+
+          output.z =
+            Number(
+              output.z ||
+              1
+            );
+
+
+          output.locked =
+            Boolean(
+              output.locked
+            );
+
+
+          return output;
+        }
+      )
+      .filter(
+        Boolean
+      );
+
+
+  const defaults =
+    createDefaultBlocks();
+
+
+  defaults.forEach(
+    defaultBlock => {
+
+      const exists =
+        normalized.some(
+          block =>
+            block.id ===
+            defaultBlock.id
+        );
+
+
+      if (
+        !exists
+      ) {
+
+        normalized.push(
+          defaultBlock
+        );
+      }
+    }
+  );
+
+
+  return normalized;
+}
+
+
+function normalizePhotos(photos) {
+
+  if (
+    !Array.isArray(
+      photos
+    )
+  ) {
+
+    return [];
+  }
+
+
+  return photos
+    .filter(
+      photo =>
+        photo?.slotId
+    )
+    .map(
+      photo => ({
+
+        slotId:
+          String(
+            photo.slotId
+          ),
+
+        caption:
+          String(
+            photo.caption ||
+            ''
+          ),
+
+        crop:
+          normalizeCrop(
+            photo.crop
+          ),
+
+        dataUrl:
+          String(
+            photo.dataUrl ||
+            ''
+          ),
+
+        fileId:
+          photo.fileId ||
+          null,
+
+        fileName:
+          String(
+            photo.fileName ||
+            ''
+          ),
+
+        mimeType:
+          String(
+            photo.mimeType ||
+            'image/jpeg'
+          )
+      })
+    );
+}
+
+
+/* =========================================================
+   변경 상태 / 자동 저장
+========================================================= */
+
+function markDirty() {
+
+  isDirty =
+    true;
+
+
+  setSaveStatus(
+    '변경사항 있음',
+    'saving'
+  );
+
+
+  scheduleAutoSave();
+}
+
+
+function scheduleAutoSave() {
+
+  clearTimeout(
+    autoSaveTimer
+  );
+
+
+  autoSaveTimer =
+    setTimeout(
+
+      async () => {
+
+        try {
+
+          await saveLocalDraft();
+
+
+          if (
+            isDirty
+          ) {
+
+            setSaveStatus(
+              '브라우저 임시저장',
+              'saved'
+            );
+          }
+
+        } catch (error) {
+
+          console.warn(
+            '브라우저 임시 저장 실패:',
+            error
+          );
+        }
+      },
+
+      APP_CONFIG
+        .AUTO_SAVE_DELAY
+    );
+}
+
+
+/* =========================================================
+   IndexedDB
+========================================================= */
+
+async function restoreLocalDraft() {
+
+  try {
+
+    const value =
+      await idbGet(
+        APP_CONFIG
+          .LOCAL_DRAFT_KEY
+      );
+
+
+    return (
+      value?.state ||
+      null
+    );
+
+  } catch (error) {
+
+    console.warn(
+      '임시 저장 복구 실패:',
+      error
+    );
+
+
+    return null;
   }
 }
 
 
+async function saveLocalDraft() {
 
-/* ============================================================
-   IndexedDB 열기
-============================================================ */
+  await idbSet(
+
+    APP_CONFIG
+      .LOCAL_DRAFT_KEY,
+
+    {
+
+      savedAt:
+        Date.now(),
+
+      state:
+        cloneJson(
+          state
+        )
+    }
+  );
+}
+
+
+async function clearLocalDraft() {
+
+  try {
+
+    await idbDelete(
+      APP_CONFIG
+        .LOCAL_DRAFT_KEY
+    );
+
+  } catch (error) {
+
+    console.warn(
+      error
+    );
+  }
+}
+
 
 function openLocalDb() {
 
@@ -4327,8 +6931,12 @@ function openLocalDb() {
 
       const request =
         indexedDB.open(
-          APP_CONFIG.LOCAL_DB_NAME,
-          1
+
+          APP_CONFIG
+            .LOCAL_DB_NAME,
+
+          APP_CONFIG
+            .LOCAL_DB_VERSION
         );
 
 
@@ -4340,212 +6948,292 @@ function openLocalDb() {
 
 
           if (
-            !db.objectStoreNames
-              .contains(
-                APP_CONFIG.LOCAL_DB_STORE
-              )
+            !db.objectStoreNames.contains(
+              APP_CONFIG
+                .LOCAL_STORE_NAME
+            )
           ) {
 
             db.createObjectStore(
-              APP_CONFIG.LOCAL_DB_STORE
+              APP_CONFIG
+                .LOCAL_STORE_NAME
             );
           }
         };
 
 
       request.onsuccess =
-        () =>
+        () => {
+
           resolve(
             request.result
           );
+        };
 
 
       request.onerror =
-        () =>
+        () => {
+
           reject(
-            request.error
+            request.error ||
+            new Error(
+              'IndexedDB를 열 수 없습니다.'
+            )
           );
+        };
     }
   );
 }
 
 
+async function idbGet(key) {
 
-/* ============================================================
-   미리보기 크기
-============================================================ */
-
-function fitPreviewToWindow(
-  force = true
-) {
-
-  const stage =
-    elements.paperStage;
+  const db =
+    await openLocalDb();
 
 
-  const poster =
-    elements.poster;
+  return new Promise(
+    (
+      resolve,
+      reject
+    ) => {
+
+      const transaction =
+        db.transaction(
+
+          APP_CONFIG
+            .LOCAL_STORE_NAME,
+
+          'readonly'
+        );
 
 
-  if (
-    !stage ||
-    !poster
-  ) {
-    return;
-  }
+      const request =
+        transaction
+          .objectStore(
+            APP_CONFIG
+              .LOCAL_STORE_NAME
+          )
+          .get(
+            key
+          );
 
 
-  const availableWidth =
-    Math.max(
-      400,
-      stage.clientWidth -
-        70
-    );
+      request.onsuccess =
+        () => {
+
+          resolve(
+            request.result ||
+            null
+          );
+        };
 
 
-  const availableHeight =
-    Math.max(
-      400,
-      stage.clientHeight -
-        70
-    );
+      request.onerror =
+        () => {
+
+          reject(
+            request.error
+          );
+        };
 
 
-  const fitted =
-    Math.min(
-      availableWidth /
-        794,
+      transaction.oncomplete =
+        () => {
 
-      availableHeight /
-        1123,
-
-      1
-    );
-
-
-  if (
-    force ||
-    previewZoom <= 1
-  ) {
-
-    setPreviewZoom(
-      clamp(
-        Math.floor(
-          fitted *
-          20
-        ) /
-        20,
-        0.4,
-        1
-      )
-    );
-  }
-}
-
-
-
-function changeZoom(
-  delta
-) {
-
-  setPreviewZoom(
-    clamp(
-      previewZoom +
-        delta,
-      0.4,
-      1.3
-    )
+          db.close();
+        };
+    }
   );
 }
 
 
-
-function setPreviewZoom(
+async function idbSet(
+  key,
   value
 ) {
 
-  previewZoom =
-    Math.round(
-      value *
-      10
-    ) /
-    10;
+  const db =
+    await openLocalDb();
 
 
-  elements.poster.style.zoom =
-    String(
-      previewZoom
-    );
+  return new Promise(
+    (
+      resolve,
+      reject
+    ) => {
+
+      const transaction =
+        db.transaction(
+
+          APP_CONFIG
+            .LOCAL_STORE_NAME,
+
+          'readwrite'
+        );
 
 
-  elements.zoomLabel.textContent =
-    `${Math.round(
-      previewZoom *
-      100
-    )}%`;
+      transaction
+        .objectStore(
+          APP_CONFIG
+            .LOCAL_STORE_NAME
+        )
+        .put(
+          value,
+          key
+        );
+
+
+      transaction.oncomplete =
+        () => {
+
+          db.close();
+
+          resolve();
+        };
+
+
+      transaction.onerror =
+        () => {
+
+          reject(
+            transaction.error
+          );
+        };
+    }
+  );
 }
 
 
+async function idbDelete(key) {
 
-/* ============================================================
-   저장 상태 표시
-============================================================ */
+  const db =
+    await openLocalDb();
 
-function setSaveStatus(
-  text,
-  type = ''
+
+  return new Promise(
+    (
+      resolve,
+      reject
+    ) => {
+
+      const transaction =
+        db.transaction(
+
+          APP_CONFIG
+            .LOCAL_STORE_NAME,
+
+          'readwrite'
+        );
+
+
+      transaction
+        .objectStore(
+          APP_CONFIG
+            .LOCAL_STORE_NAME
+        )
+        .delete(
+          key
+        );
+
+
+      transaction.oncomplete =
+        () => {
+
+          db.close();
+
+          resolve();
+        };
+
+
+      transaction.onerror =
+        () => {
+
+          reject(
+            transaction.error
+          );
+        };
+    }
+  );
+}
+
+
+/* =========================================================
+   확인 Dialog
+========================================================= */
+
+function confirmAction(
+  title,
+  message
 ) {
 
-  elements.saveStatus.textContent =
-    text;
+  return new Promise(
+    resolve => {
+
+      if (
+        confirmResolver
+      ) {
+
+        confirmResolver(
+          false
+        );
+      }
 
 
-  elements.saveStatus.classList.remove(
-    'is-saved',
-    'is-saving',
-    'is-error'
+      confirmResolver =
+        resolve;
+
+
+      dom.confirmTitle.textContent =
+        title;
+
+
+      dom.confirmMessage.textContent =
+        message;
+
+
+      dom.confirmDialog.showModal();
+    }
   );
+}
 
+
+function resolveConfirm(value) {
 
   if (
-    type === 'saved'
+    dom.confirmDialog.open
   ) {
 
-    elements.saveStatus.classList.add(
-      'is-saved'
-    );
+    dom.confirmDialog.close();
   }
 
 
-  if (
-    type === 'saving'
-  ) {
+  const resolver =
+    confirmResolver;
 
-    elements.saveStatus.classList.add(
-      'is-saving'
-    );
-  }
+
+  confirmResolver =
+    null;
 
 
   if (
-    type === 'error'
+    resolver
   ) {
 
-    elements.saveStatus.classList.add(
-      'is-error'
+    resolver(
+      value
     );
   }
 }
 
 
-
-/* ============================================================
-   토스트
-============================================================ */
+/* =========================================================
+   Toast
+========================================================= */
 
 function showToast(
   message,
-  type = ''
+  type
 ) {
 
   clearTimeout(
@@ -4553,398 +7241,213 @@ function showToast(
   );
 
 
-  elements.toast.textContent =
+  dom.toast.hidden =
+    false;
+
+
+  dom.toast.textContent =
     message;
 
 
-  elements.toast.classList.remove(
-    'is-success',
-    'is-error'
-  );
+  dom.toast.className =
+    'toast';
 
 
   if (
-    type === 'success'
+    type ===
+    'success'
   ) {
 
-    elements.toast.classList.add(
+    dom.toast.classList.add(
       'is-success'
     );
   }
 
 
   if (
-    type === 'error'
+    type ===
+    'error'
   ) {
 
-    elements.toast.classList.add(
+    dom.toast.classList.add(
       'is-error'
     );
   }
-
-
-  elements.toast.hidden =
-    false;
 
 
   toastTimer =
     setTimeout(
       () => {
 
-        elements.toast.hidden =
+        dom.toast.hidden =
           true;
       },
-      type === 'error'
-        ? 4300
-        : 2800
+      3600
     );
 }
 
 
+/* =========================================================
+   Loading
+========================================================= */
 
-/* ============================================================
-   로딩
-============================================================ */
+function showLoading(message) {
 
-function showLoading(
-  message =
-    '처리 중입니다.'
-) {
-
-  elements.loadingMessage.textContent =
-    message;
+  dom.loadingMessage.textContent =
+    message ||
+    '처리 중입니다.';
 
 
-  elements.loadingOverlay.hidden =
+  dom.loadingOverlay.hidden =
     false;
 }
 
 
-
 function hideLoading() {
 
-  elements.loadingOverlay.hidden =
+  dom.loadingOverlay.hidden =
     true;
 }
 
 
+/* =========================================================
+   저장 상태
+========================================================= */
 
-/* ============================================================
-   확인 dialog
-============================================================ */
+function setSaveStatus(
+  text,
+  type
+) {
 
-function askConfirm({
-  title,
-  message,
-  confirmText = '확인'
-}) {
+  dom.saveStatus.textContent =
+    text;
+
+
+  dom.saveStatus.className =
+    'save-status';
+
 
   if (
-    confirmResolver
+    type ===
+    'saving'
   ) {
 
-    confirmResolver(
-      false
+    dom.saveStatus.classList.add(
+      'is-saving'
     );
-
-    confirmResolver =
-      null;
   }
-
-
-  elements.confirmTitle.textContent =
-    title ||
-    '확인';
-
-
-  elements.confirmMessage.textContent =
-    message ||
-    '';
-
-
-  $('#btn-confirm-ok').textContent =
-    confirmText;
 
 
   if (
-    !elements.confirmDialog.open
+    type ===
+    'saved'
   ) {
 
-    elements.confirmDialog
-      .showModal();
+    dom.saveStatus.classList.add(
+      'is-saved'
+    );
   }
 
 
-  return new Promise(
-    resolve => {
+  if (
+    type ===
+    'error'
+  ) {
 
-      confirmResolver =
-        resolve;
-    }
+    dom.saveStatus.classList.add(
+      'is-error'
+    );
+  }
+}
+
+
+/* =========================================================
+   활동 찾기
+========================================================= */
+
+function getActivity(activityId) {
+
+  return (
+    state.activities.find(
+      activity =>
+        activity.id ===
+        activityId
+    ) ||
+    null
   );
 }
 
 
+function getActivityIndex(activityId) {
 
-function resolveConfirm(
-  value
-) {
-
-  if (
-    elements.confirmDialog.open
-  ) {
-
-    elements.confirmDialog
-      .close();
-  }
-
-
-  if (
-    confirmResolver
-  ) {
-
-    const resolve =
-      confirmResolver;
-
-
-    confirmResolver =
-      null;
-
-
-    resolve(
-      Boolean(
-        value
-      )
+  const index =
+    state.activities.findIndex(
+      activity =>
+        activity.id ===
+        activityId
     );
-  }
+
+
+  return (
+    index >= 0
+      ? index
+      : 0
+  );
 }
 
 
+/* =========================================================
+   공통 유틸
+========================================================= */
 
-/* ============================================================
-   상태 정규화
-============================================================ */
-
-function normalizeState(
-  input
+function $(
+  selector,
+  root = document
 ) {
 
-  const source =
-    input ||
-    {};
-
-
-  const result =
-    createEmptyState();
-
-
-  result.id =
-    source.id ||
-    null;
-
-
-  result.createdAt =
-    source.createdAt ||
-    null;
-
-
-  result.updatedAt =
-    source.updatedAt ||
-    null;
-
-
-  result.type =
-    source.type ===
-      'creative'
-      ? 'creative'
-      : 'autonomous';
-
-
-  result.clubName =
-    String(
-      source.clubName ||
-      ''
-    );
-
-
-  result.teacherName =
-    String(
-      source.teacherName ||
-      source.teacher ||
-      ''
-    );
-
-
-  result.title =
-    String(
-      source.title ||
-      ''
-    );
-
-
-  result.activityText =
-    String(
-      source.activityText ||
-      ''
-    );
-
-
-  result.photoLayout =
-    clamp(
-      Math.round(
-        Number(
-          source.photoLayout
-        ) ||
-        2
-      ),
-      1,
-      APP_CONFIG.MAX_PHOTOS
-    );
-
-
-  result.status =
-    source.status ===
-      'completed'
-      ? 'completed'
-      : 'draft';
-
-
-  result.photos =
-    normalizePhotos(
-      source.photos
-    );
-
-
-  return result;
+  return root.querySelector(
+    selector
+  );
 }
 
 
-
-/* ============================================================
-   사진 상태 정규화
-============================================================ */
-
-function normalizePhotos(
-  input
+function $$(
+  selector,
+  root = document
 ) {
 
-  const source =
-    Array.isArray(
-      input
+  return Array.from(
+    root.querySelectorAll(
+      selector
     )
-      ? input
-      : [];
-
-
-  const result =
-    Array.from(
-      {
-        length:
-          APP_CONFIG.MAX_PHOTOS
-      },
-      (_, index) =>
-        EMPTY_PHOTO(
-          index
-        )
-    );
-
-
-  source
-    .slice(
-      0,
-      APP_CONFIG.MAX_PHOTOS
-    )
-    .forEach(
-      (
-        photo,
-        index
-      ) => {
-
-        if (
-          !photo
-        ) {
-          return;
-        }
-
-
-        /*
-         * photo_3 같은 slotId가 있으면
-         * 정확한 슬롯 위치를 찾아 넣는다.
-         */
-        const slotMatch =
-          String(
-            photo.slotId ||
-            ''
-          )
-            .match(
-              /^photo_(\d+)$/
-            );
-
-
-        const targetIndex =
-          slotMatch
-            ? clamp(
-                Number(
-                  slotMatch[1]
-                ) -
-                  1,
-                0,
-                APP_CONFIG.MAX_PHOTOS -
-                  1
-              )
-            : index;
-
-
-        result[targetIndex] = {
-
-          ...EMPTY_PHOTO(
-            targetIndex
-          ),
-
-          ...photo,
-
-          slotId:
-            `photo_${targetIndex + 1}`,
-
-          caption:
-            String(
-              photo.caption ||
-              ''
-            ),
-
-          crop:
-            normalizeCrop(
-              photo.crop
-            ),
-
-          imageDirty:
-            Boolean(
-              photo.imageDirty
-            )
-        };
-      }
-    );
-
-
-  return result;
+  );
 }
 
 
-
-/* ============================================================
-   크롭 정규화
-============================================================ */
-
-function normalizeCrop(
-  crop
+function clamp(
+  value,
+  min,
+  max
 ) {
+
+  return Math.min(
+    max,
+    Math.max(
+      min,
+      value
+    )
+  );
+}
+
+
+function normalizeCrop(crop) {
 
   return {
 
     x:
       clamp(
-        finiteNumber(
-          crop?.x,
+        Number(
+          crop?.x ??
           50
         ),
         0,
@@ -4953,8 +7456,8 @@ function normalizeCrop(
 
     y:
       clamp(
-        finiteNumber(
-          crop?.y,
+        Number(
+          crop?.y ??
           50
         ),
         0,
@@ -4963,174 +7466,54 @@ function normalizeCrop(
 
     scale:
       clamp(
-        finiteNumber(
-          crop?.scale,
+        Number(
+          crop?.scale ??
           1
         ),
         1,
-        3
+        4
       )
   };
 }
 
 
+function cloneJson(value) {
 
-/* ============================================================
-   처음 HTML에 들어있는 예시 문구 제거
-============================================================ */
-
-function clearPreviewPlaceholderText() {
-
-  [
-    elements.previewClubName,
-    elements.previewTeacher,
-    elements.previewTitle,
-    elements.previewActivity
-  ]
-    .forEach(
-      element => {
-
-        element.textContent =
-          '';
-      }
-    );
-
-
-  elements.photoCards
-    .forEach(
-      card => {
-
-        const caption =
-          card.querySelector(
-            '.photo-caption'
-          );
-
-
-        caption.textContent =
-          '';
-      }
-    );
-}
-
-
-
-/* ============================================================
-   contenteditable 텍스트 설정
-============================================================ */
-
-function setEditableText(
-  element,
-  value
-) {
-
-  const text =
-    String(
-      value ||
-      ''
-    );
-
-
-  if (
-    editableText(
-      element
-    ) === text
-  ) {
-    return;
-  }
-
-
-  element.textContent =
-    text;
-}
-
-
-
-/* ============================================================
-   contenteditable 텍스트 읽기
-============================================================ */
-
-function editableText(
-  element
-) {
-
-  return String(
-    element.innerText ||
-    element.textContent ||
-    ''
-  )
-    .replace(
-      /\u00a0/g,
-      ' '
+  return JSON.parse(
+    JSON.stringify(
+      value
     )
-    .replace(
-      /\n{3,}/g,
-      '\n\n'
-    )
-    .trim();
-}
-
-
-
-/* ============================================================
-   작성 내용 존재 여부
-============================================================ */
-
-function hasMeaningfulContent(
-  inputState
-) {
-
-  if (
-    !inputState
-  ) {
-    return false;
-  }
-
-
-  return Boolean(
-
-    inputState.id ||
-
-    String(
-      inputState.clubName ||
-      ''
-    ).trim() ||
-
-    String(
-      inputState.teacherName ||
-      ''
-    ).trim() ||
-
-    String(
-      inputState.title ||
-      ''
-    ).trim() ||
-
-    String(
-      inputState.activityText ||
-      ''
-    ).trim() ||
-
-    (
-      inputState.photos ||
-      []
-    )
-      .some(
-        photo =>
-          photo?.dataUrl ||
-          photo?.fileId
-      )
   );
 }
 
 
+function createClientId(prefix) {
 
-/* ============================================================
-   파일명 정리
-============================================================ */
+  const random =
+    Math.random()
+      .toString(36)
+      .slice(
+        2,
+        9
+      );
 
-function safeFileName(
-  value
-) {
+
+  return (
+
+    `${prefix}_` +
+
+    `${Date.now().toString(36)}_` +
+
+    random
+
+  ).slice(
+    0,
+    60
+  );
+}
+
+
+function safeDownloadFileName(value) {
 
   return (
 
@@ -5142,25 +7525,14 @@ function safeFileName(
         /[\\/:*?"<>|\r\n]+/g,
         '_'
       )
-      .trim()
-      .slice(
-        0,
-        80
-      ) ||
+      .trim() ||
 
     '동아리_전시자료'
   );
 }
 
 
-
-/* ============================================================
-   날짜 표시
-============================================================ */
-
-function formatDate(
-  value
-) {
+function formatDateTime(value) {
 
   const date =
     new Date(
@@ -5173,18 +7545,23 @@ function formatDate(
       date.getTime()
     )
   ) {
+
     return '';
   }
 
 
-  return new Intl.DateTimeFormat(
+  return date.toLocaleString(
     'ko-KR',
     {
-      month:
+
+      year:
         'numeric',
 
+      month:
+        '2-digit',
+
       day:
-        'numeric',
+        '2-digit',
 
       hour:
         '2-digit',
@@ -5192,59 +7569,9 @@ function formatDate(
       minute:
         '2-digit'
     }
-  )
-    .format(
-      date
-    );
-}
-
-
-
-/* ============================================================
-   숫자 유틸
-============================================================ */
-
-function finiteNumber(
-  value,
-  fallback
-) {
-
-  const number =
-    Number(
-      value
-    );
-
-
-  return Number.isFinite(
-    number
-  )
-    ? number
-    : fallback;
-}
-
-
-
-function clamp(
-  value,
-  min,
-  max
-) {
-
-  return Math.min(
-    max,
-
-    Math.max(
-      min,
-      value
-    )
   );
 }
 
-
-
-/* ============================================================
-   Debounce
-============================================================ */
 
 function debounce(
   callback,
@@ -5254,7 +7581,9 @@ function debounce(
   let timer;
 
 
-  return (...args) => {
+  return function (
+    ...args
+  ) {
 
     clearTimeout(
       timer
@@ -5263,216 +7592,38 @@ function debounce(
 
     timer =
       setTimeout(
-        () =>
+        () => {
+
           callback(
             ...args
-          ),
+          );
+        },
         delay
       );
   };
 }
 
 
+function cssEscape(value) {
 
-/* ============================================================
-   이미지 읽기
-============================================================ */
+  if (
+    window.CSS &&
+    typeof window.CSS.escape ===
+    'function'
+  ) {
 
-function loadImage(
-  src
-) {
-
-  return new Promise(
-    (
-      resolve,
-      reject
-    ) => {
-
-      const image =
-        new Image();
-
-
-      image.onload =
-        () =>
-          resolve(
-            image
-          );
-
-
-      image.onerror =
-        () =>
-          reject(
-            new Error(
-              '사진을 읽을 수 없습니다.'
-            )
-          );
-
-
-      image.src =
-        src;
-    }
-  );
-}
-
-
-
-/* ============================================================
-   Canvas → Blob
-============================================================ */
-
-function canvasToBlob(
-  canvas,
-  type,
-  quality
-) {
-
-  return new Promise(
-    resolve => {
-
-      canvas.toBlob(
-        resolve,
-        type,
-        quality
-      );
-    }
-  );
-}
-
-
-
-/* ============================================================
-   Blob → Data URL
-============================================================ */
-
-function blobToDataUrl(
-  blob
-) {
-
-  return new Promise(
-    (
-      resolve,
-      reject
-    ) => {
-
-      const reader =
-        new FileReader();
-
-
-      reader.onload =
-        () =>
-          resolve(
-            reader.result
-          );
-
-
-      reader.onerror =
-        () =>
-          reject(
-            reader.error
-          );
-
-
-      reader.readAsDataURL(
-        blob
-      );
-    }
-  );
-}
-
-
-
-/* ============================================================
-   파일 다운로드
-============================================================ */
-
-function downloadDataUrl(
-  dataUrl,
-  fileName
-) {
-
-  const link =
-    document.createElement(
-      'a'
-    );
-
-
-  link.href =
-    dataUrl;
-
-
-  link.download =
-    fileName;
-
-
-  document.body.append(
-    link
-  );
-
-
-  link.click();
-
-
-  link.remove();
-}
-
-
-
-/* ============================================================
-   이미지 로딩 대기
-============================================================ */
-
-async function waitForImages(
-  root
-) {
-
-  const images =
-    [
-      ...root.querySelectorAll(
-        'img'
+    return window.CSS.escape(
+      String(
+        value
       )
-    ]
-      .filter(
-        img =>
-          !img.hidden
-      );
+    );
+  }
 
 
-  await Promise.all(
-
-    images.map(
-      img => {
-
-        if (
-          img.complete &&
-          img.naturalWidth > 0
-        ) {
-
-          return Promise.resolve();
-        }
-
-
-        return new Promise(
-          resolve => {
-
-            img.addEventListener(
-              'load',
-              resolve,
-              {
-                once: true
-              }
-            );
-
-
-            img.addEventListener(
-              'error',
-              resolve,
-              {
-                once: true
-              }
-            );
-          }
-        );
-      }
-    )
+  return String(
+    value
+  ).replace(
+    /["\\]/g,
+    '\\$&'
   );
 }
